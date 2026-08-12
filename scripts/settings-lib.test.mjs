@@ -12,6 +12,7 @@ import {
   classifyResourceProbe,
   findDatabase,
   parseWranglerRows,
+  resolveToolSpec,
 } from './setup-cloudflare.mjs';
 
 async function exampleSettings() {
@@ -88,4 +89,43 @@ void test('Wrangler row parsing and D1 name collision checks fail closed', () =>
   assert.throws(() => parseWranglerRows('{"unexpected":true}'), /安全停止/);
   assert.throws(() => parseWranglerRows('not-json'), /安全停止/);
   assert.deepEqual(findDatabase([{ name: 'same-name' }], 'same-name'), { name: 'same-name', id: '' });
+});
+
+void test('resolves npm through npm_execpath on Windows', () => {
+  const spec = resolveToolSpec('npm', {
+    platform: 'win32',
+    env: { npm_execpath: 'C:\\project\\node_modules\\npm\\bin\\npm-cli.js' },
+    nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+  });
+  assert.deepEqual(spec, {
+    command: 'C:\\Program Files\\nodejs\\node.exe',
+    prefixArgs: ['C:\\project\\node_modules\\npm\\bin\\npm-cli.js'],
+  });
+});
+
+void test('fails closed for Windows npm without npm_execpath', () => {
+  assert.throws(
+    () => resolveToolSpec('npm', { platform: 'win32', env: {}, nodeExecutable: 'node' }),
+    /npm run setup:cloudflare/,
+  );
+});
+
+void test('resolves Wrangler through the Node executable and local JS CLI', () => {
+  const cli = 'C:\\project\\node_modules\\wrangler\\wrangler-dist\\cli.js';
+  for (const platform of ['win32', 'linux']) {
+    assert.deepEqual(resolveToolSpec('wrangler', {
+      platform,
+      env: {},
+      nodeExecutable: 'node',
+      wranglerCli: cli,
+    }), { command: 'node', prefixArgs: [cli] });
+  }
+});
+
+void test('falls back to npm on non-Windows without npm_execpath', () => {
+  assert.deepEqual(resolveToolSpec('npm', {
+    platform: 'linux',
+    env: {},
+    nodeExecutable: 'node',
+  }), { command: 'npm', prefixArgs: [] });
 });

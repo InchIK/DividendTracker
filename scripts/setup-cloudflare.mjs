@@ -1,4 +1,5 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +12,38 @@ import {
   writeSettings,
 } from './settings-lib.mjs';
 
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const require = createRequire(import.meta.url);
+
+/**
+ * Resolve a local CLI to an executable command and argument prefix.
+ *
+ * Keeping the executable and its arguments separate lets callers invoke Node
+ * CLIs without a shell, which is safe for paths containing spaces on Windows.
+ */
+export function resolveToolSpec(tool, {
+  platform = process.platform,
+  env = process.env,
+  nodeExecutable = process.execPath,
+  wranglerCli,
+} = {}) {
+  if (tool === 'wrangler') {
+    return {
+      command: nodeExecutable,
+      prefixArgs: [wranglerCli ?? require.resolve('wrangler')],
+    };
+  }
+
+  if (tool !== 'npm') throw new Error(`Unknown Cloudflare setup tool: ${String(tool)}`);
+
+  const npmExecPath = typeof env?.npm_execpath === 'string' ? env.npm_execpath : '';
+  if (npmExecPath.trim()) {
+    return { command: nodeExecutable, prefixArgs: [npmExecPath] };
+  }
+
+  if (platform !== 'win32') return { command: 'npm', prefixArgs: [] };
+
+  throw new Error('無法啟動 npm CLI；請透過 npm run setup:cloudflare 執行，setup stopped safely.');
+}
 
 /** Parse Wrangler JSON arrays from either a bare array or `{ result: [] }`. */
 export function parseWranglerRows(raw) {
@@ -44,35 +75,44 @@ export function databaseIdentity(row) {
   };
 }
 
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+function toolSpec(tool) {
+  return typeof tool === 'string' ? resolveToolSpec(tool) : tool;
+}
+
+function run(tool, args, options = {}) {
+  const spec = toolSpec(tool);
+  const result = spawnSync(spec.command, [...spec.prefixArgs, ...args], {
     cwd: ROOT,
     stdio: 'inherit',
     env: { ...process.env, ...options.env },
   });
+  if (result.error) throw new Error('無法啟動 npm/Cloudflare CLI；setup stopped safely.');
   if (result.status !== 0) throw new Error('Cloudflare setup command failed.');
 }
 
-function capture(command, args) {
-  return spawnSync(command, args, { cwd: ROOT, encoding: 'utf8' });
+function capture(tool, args) {
+  const spec = toolSpec(tool);
+  const result = spawnSync(spec.command, [...spec.prefixArgs, ...args], { cwd: ROOT, encoding: 'utf8' });
+  if (result.error) throw new Error('無法啟動 npm/Cloudflare CLI；setup stopped safely.');
+  return result;
 }
 
 function requireLogin() {
-  let whoami = capture(npx, ['wrangler', 'whoami', '--json']);
+  let whoami = capture('wrangler', ['whoami', '--json']);
   if (whoami.status !== 0) {
-    run(npx, ['wrangler', 'login']);
-    whoami = capture(npx, ['wrangler', 'whoami', '--json']);
+    run('wrangler', ['login']);
+    whoami = capture('wrangler', ['whoami', '--json']);
     if (whoami.status !== 0) throw new Error('Cloudflare 登入失敗，設定已停止。');
   }
 }
 
 function probeWorker(workerName) {
-  const result = capture(npx, ['wrangler', 'deployments', 'list', '--name', workerName, '--json']);
+  const result = capture('wrangler', ['deployments', 'list', '--name', workerName, '--json']);
   return classifyResourceProbe({ status: result.status, stdout: result.stdout, stderr: result.stderr });
 }
 
 function listD1() {
-  const result = capture(npx, ['wrangler', 'd1', 'list', '--json']);
+  const result = capture('wrangler', ['d1', 'list', '--json']);
   if (result.status !== 0) throw new Error('無法列出 Cloudflare D1，設定已停止。');
   return parseWranglerRows(result.stdout);
 }
@@ -84,10 +124,10 @@ export function findDatabase(rows, databaseName) {
 async function main() {
   console.log('DividendTracker Cloudflare 設定開始');
   let settings = await ensureSettings();
-  run(npm, ['install']);
+  run('npm', ['install']);
 
   await writeFile(GENERATED_WRANGLER_PATH, generatedWrangler(settings), 'utf8');
-  run(npm, ['run', 'check']);
+  run('npm', ['run', 'check']);
 
   requireLogin();
   const established = Boolean(settings.cloudflare.d1.databaseId);
@@ -102,8 +142,8 @@ async function main() {
       throw new Error('同名 Cloudflare D1 已存在；設定已停止，未重用既有資料庫。');
     }
 
-    run(npx, [
-      'wrangler', 'd1', 'create', settings.cloudflare.d1.databaseName,
+    run('wrangler', [
+      'd1', 'create', settings.cloudflare.d1.databaseName,
       '--location', settings.cloudflare.d1.location,
     ]);
     const created = findDatabase(listD1(), settings.cloudflare.d1.databaseName);
@@ -113,8 +153,8 @@ async function main() {
   }
 
   await writeFile(GENERATED_WRANGLER_PATH, generatedWrangler(settings), 'utf8');
-  run(npx, [
-    'wrangler', 'd1', 'migrations', 'apply', settings.cloudflare.d1.binding,
+  run('wrangler', [
+    'd1', 'migrations', 'apply', settings.cloudflare.d1.binding,
     '--remote', '--config', GENERATED_WRANGLER_PATH,
   ], { env: { CI: 'true' } });
 
@@ -122,7 +162,7 @@ async function main() {
   const secretPath = join(secretDirectory, '.dev.vars');
   try {
     await writeFile(secretPath, `TOKEN_ENCRYPTION_KEY=${settings.secrets.tokenEncryptionKey}\n`, { mode: 0o600 });
-    run(npx, ['wrangler', 'deploy', '--config', GENERATED_WRANGLER_PATH, '--secrets-file', secretPath]);
+    run('wrangler', ['deploy', '--config', GENERATED_WRANGLER_PATH, '--secrets-file', secretPath]);
   } finally {
     await rm(secretDirectory, { recursive: true, force: true });
   }
