@@ -1,0 +1,34 @@
+{
+  "$schema": "./settings.schema.json",
+  "app": {
+    "name": "DividendTracker",
+    "timezone": "Asia/Taipei",
+    "allowRegistration": true,
+    "passwordPbkdf2Iterations": 100000,
+    "sessionTtlHours": 12,
+    "rememberSessionTtlDays": 30,
+    "googleAuth": { "enabled": false, "clientId": "" }
+  },
+  "cloudflare": {
+    "accountId": "",
+    "workerName": "dividend-tracker",
+    "compatibilityDate": "2026-08-08",
+    "d1": {
+      "binding": "DB",
+      "databaseName": "dividend-tracker-db",
+      "databaseId": "",
+      "location": "apac"
+    },
+    "crons": {
+      "hourlyPrices": "0 * * * *",
+      "dailyDividendsTaipei1335Utc": "35 5 * * *"
+    },
+    "observability": true
+  },
+  "sources": {
+    "sitcaDividendCsvUrl": "https://www.sitca.org.tw/MemberK0000/F/03/160547投信投顧公會境內基金配息資料.csv",
+    "twseFundMappingUrl": "https://openapi.twse.com.tw/v1/opendata/t187ap47_L",
+    "twseExDividendUrl": "https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL"
+  },
+  "secrets": { "tokenEncryptionKey": "" }
+}

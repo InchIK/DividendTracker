@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/dividend-tracker/settings.schema.json",
+  "title": "DividendTracker settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["app", "cloudflare", "sources", "secrets"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "timezone", "allowRegistration", "passwordPbkdf2Iterations", "sessionTtlHours", "rememberSessionTtlDays", "googleAuth"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "timezone": { "const": "Asia/Taipei" },
+        "allowRegistration": { "type": "boolean" },
+        "passwordPbkdf2Iterations": { "type": "integer", "minimum": 100000, "maximum": 100000 },
+        "sessionTtlHours": { "type": "integer", "minimum": 1, "maximum": 168 },
+        "rememberSessionTtlDays": { "type": "integer", "minimum": 1, "maximum": 365 },
+        "googleAuth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "clientId"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "clientId": { "type": "string" }
+          }
+        }
+      }
+    },
+    "cloudflare": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "workerName", "compatibilityDate", "d1", "crons", "observability"],
+      "properties": {
+        "accountId": { "type": "string" },
+        "workerName": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" },
+        "compatibilityDate": { "type": "string", "format": "date" },
+        "observability": { "type": "boolean" },
+        "d1": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["binding", "databaseName", "databaseId", "location"],
+          "properties": {
+            "binding": { "const": "DB" },
+            "databaseName": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$" },
+            "databaseId": { "type": "string", "pattern": "^(?:|[0-9a-fA-F-]{36})$" },
+            "location": { "enum": ["weur", "eeur", "apac", "oc", "wnam", "enam"] }
+          }
+        },
+        "crons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hourlyPrices", "dailyDividendsTaipei1335Utc"],
+          "properties": {
+            "hourlyPrices": { "type": "string" },
+            "dailyDividendsTaipei1335Utc": { "const": "35 5 * * *" }
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sitcaDividendCsvUrl", "twseFundMappingUrl", "twseExDividendUrl"],
+      "properties": {
+        "sitcaDividendCsvUrl": { "type": "string", "format": "uri" },
+        "twseFundMappingUrl": { "type": "string", "format": "uri" },
+        "twseExDividendUrl": { "type": "string", "format": "uri" }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokenEncryptionKey"],
+      "properties": {
+        "tokenEncryptionKey": { "type": "string", "pattern": "^(?:|[A-Za-z0-9_-]{43})$" }
+      }
+    }
+  }
+}

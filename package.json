@@ -1,0 +1,60 @@
+{
+  "name": "dividend-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "setup": "node scripts/init-settings.mjs && npm run config:generate",
+    "config:generate": "node scripts/generate-config.mjs",
+    "setup:cloudflare": "node scripts/setup-cloudflare.mjs",
+    "clean:personal-data": "node scripts/clean-personal-data.mjs",
+    "dev": "vite --mode personal",
+    "build": "node scripts/prepare-build.mjs && tsc -b && vite build && npm run build:widget && node scripts/sanitize-build-artifacts.mjs dist && npm run check:privacy",
+    "build:widget": "node scripts/build-widget.mjs",
+    "preview": "vite preview",
+    "deploy": "npm run config:generate && npm run build && wrangler deploy --config wrangler.generated.jsonc",
+    "cf-typegen": "wrangler types --config wrangler.generated.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote --config wrangler.generated.jsonc",
+    "source:probe": "tsx scripts/probe-sources.ts",
+    "test": "vitest run && npm run test:build-security",
+    "test:build-security": "node --test scripts/sanitize-build-artifacts.test.mjs scripts/settings-lib.test.mjs scripts/check-personal-data.test.mjs",
+    "check:privacy:current": "node scripts/check-personal-data.mjs --tracked",
+    "check:privacy": "node scripts/check-personal-data.mjs --tracked --build",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint .",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "jose": "^6.2.8",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.51.1",
+    "@cloudflare/vitest-pool-workers": "^0.21.0",
+    "@eslint/js": "^9.10.0",
+    "@playwright/test": "^1.47.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.10.0",
+    "playwright": "^1.47.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.1"
+  }
+}

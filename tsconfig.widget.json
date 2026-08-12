@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": false,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "rootDir": "./widget-src",
+    "outDir": "./dist/widget-types"
+  },
+  "include": ["widget-src/**/*.ts", "widget-src/**/*.d.ts"],
+  "exclude": ["node_modules", "dist", "worker", "web", "scripts"]
+}

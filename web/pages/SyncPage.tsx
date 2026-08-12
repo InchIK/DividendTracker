@@ -1,0 +1,207 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, type SyncRunDTO, type SourcesStatusResponse } from "@/api/client";
+import { formatDateTime } from "@/lib/format";
+import { FreshnessCard } from "@/components/FreshnessCard";
+
+const STATUS_CLASS: Record<SyncRunDTO["status"], string> = {
+  running: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+  success: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+  partial: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  failed: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+};
+
+const STATUS_LABEL: Record<SyncRunDTO["status"], string> = {
+  running: "執行中",
+  success: "成功",
+  partial: "部分",
+  failed: "失敗",
+};
+
+export function SyncPage(): React.JSX.Element {
+  const [runs, setRuns] = useState<SyncRunDTO[]>([]);
+  const [sources, setSources] = useState<SourcesStatusResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [r, s] = await Promise.all([
+        api.getSyncRuns(50).catch(() => ({ items: [] })),
+        api.getSourcesStatus().catch(() => null),
+      ]);
+      setRuns(r.items ?? []);
+      setSources(s);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "載入同步紀錄失敗");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, []);
+
+  const triggerSync = async () => {
+    if (syncing) return; // prevent double-click
+    setSyncing(true);
+    setSyncMsg(null);
+    try {
+      await api.triggerSync();
+      setSyncMsg("✅ 同步已觸發，請稍候再重新整理。");
+      // Refresh after a short delay so the new run appears
+      setTimeout(() => { void load(); }, 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "觸發同步失敗");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const toggleExpand = (id: number) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">資料同步</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            觸發同步、檢視最近 50 次執行紀錄與資料來源狀態。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { void triggerSync(); }}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {syncing && <Spinner />}
+            {syncing ? "同步中…" : "🔄 立即同步"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+          >
+            重新整理
+          </button>
+        </div>
+      </header>
+
+      {syncMsg && (
+        <div className="text-sm text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-900/40 px-3 py-2 rounded-md">
+          {syncMsg}
+        </div>
+      )}
+      {error && (
+        <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/40 px-3 py-2 rounded-md">
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Source status */}
+      <section>
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">資料來源狀態</h2>
+        {sources && sources.sources.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {sources.sources.map((s) => (
+              <FreshnessCard key={s.sourceKind} source={s} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">尚無來源狀態。</p>
+        )}
+      </section>
+
+      {/* Sync runs */}
+      <section>
+        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">
+          最近同步紀錄
+        </h2>
+        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-semibold">#</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">觸發</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">開始</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">完成</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold">狀態</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold">對應</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold">預告</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold">配息</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold">套用</th>
+                <th className="px-3 py-2 text-right text-xs font-semibold">變更</th>
+                <th className="px-3 py-2 text-center text-xs font-semibold">詳情</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+              {loading ? (
+                <tr><td colSpan={11} className="text-center py-8 text-slate-400">載入中…</td></tr>
+              ) : runs.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-8 text-slate-400">尚無同步紀錄</td></tr>
+              ) : (
+                runs.map((r) => (
+                  <>
+                    <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                      <td className="px-3 py-2 font-mono">{r.id}</td>
+                      <td className="px-3 py-2 text-xs">{r.triggerKind}</td>
+                      <td className="px-3 py-2 text-xs font-mono">{formatDateTime(r.startedAt)}</td>
+                      <td className="px-3 py-2 text-xs font-mono">{r.finishedAt ? formatDateTime(r.finishedAt) : "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_CLASS[r.status]}`}>
+                          {STATUS_LABEL[r.status]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">{r.mappingRowsRead.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{r.scheduleRowsRead.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{r.dividendRowsRead.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{r.observationsApplied.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-mono">{r.eventsChanged.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(r.id)}
+                          className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          {expanded[r.id] ? "收起" : "展開"}
+                        </button>
+                      </td>
+                    </tr>
+                    {expanded[r.id] && (
+                      <tr key={`${r.id}-detail`}>
+                        <td colSpan={11} className="px-4 py-3 bg-slate-50 dark:bg-slate-900/40 text-xs">
+                          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            <div><dt className="text-slate-400">最新來源日期</dt><dd className="font-mono">{r.newestSourceDate ?? "—"}</dd></div>
+                            <div><dt className="text-slate-400">錯誤代碼</dt><dd className="font-mono">{r.errorCode ?? "—"}</dd></div>
+                            <div><dt className="text-slate-400">錯誤訊息</dt><dd className="break-words">{r.errorMessage ?? "—"}</dd></div>
+                          </dl>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" />
+    </svg>
+  );
+}
+
+export default SyncPage;

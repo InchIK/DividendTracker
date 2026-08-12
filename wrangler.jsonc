@@ -1,0 +1,41 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dividend-tracker",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-08-08",
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health"]
+  },
+  "vars": {
+    "APP_NAME": "DividendTracker",
+    "APP_TIMEZONE": "Asia/Taipei",
+    "ALLOW_REGISTRATION": "true",
+    "PASSWORD_PBKDF2_ITERATIONS": "100000",
+    "SESSION_TTL_HOURS": "12",
+    "REMEMBER_SESSION_TTL_DAYS": "30",
+    "GOOGLE_AUTH_ENABLED": "false",
+    "GOOGLE_CLIENT_ID": "",
+    "SITCA_DIVIDEND_CSV_URL": "https://www.sitca.org.tw/MemberK0000/F/03/160547投信投顧公會境內基金配息資料.csv",
+    "TWSE_FUND_MAPPING_URL": "https://openapi.twse.com.tw/v1/opendata/t187ap47_L",
+    "TWSE_EX_DIVIDEND_URL": "https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL"
+  },
+  "secrets": {
+    "required": ["TOKEN_ENCRYPTION_KEY"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dividend-tracker-db",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["0 * * * *", "35 5 * * *"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}
