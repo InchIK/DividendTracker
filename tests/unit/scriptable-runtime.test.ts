@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { WidgetApiError, fetchWidgetPayload, parseUpcomingWidgetPayload } from '../../widget-src/api';
-import type { UpcomingWidgetResponse } from '../../widget-src/formatter';
+import {
+  nextRefreshDate,
+  normalizeWidgetRefreshMinutes,
+  type UpcomingWidgetResponse,
+} from '../../widget-src/formatter';
 import {
   KEY_BASE_URL,
   KEY_INSTALLATION_ID,
@@ -20,6 +24,10 @@ const payload: UpcomingWidgetResponse = {
     { status: 'no_announced_payout', period: { year: 2026, month: 9, timezone: 'Asia/Taipei' }, items: [], totalGrossAmount: null, display: { title: '下月', total: null, lines: [], compact: null }, generatedAt: '2026-08-11T05:35:00.000Z' },
   ],
   generatedAt: '2026-08-11T05:35:00.000Z',
+  appearance: {
+    theme: 'ocean', mode: 'gradient', startColor: '#071426', endColor: '#0F766E',
+    sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 45, updatedAt: null,
+  },
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -38,6 +46,19 @@ describe('Scriptable native runtime integration', () => {
     vi.stubGlobal('Request', MockRequest);
     expect(await fetchWidgetPayload('https://worker.example.test/', 'widget-read-token')).toEqual(payload);
     expect(created[0]).toMatchObject({ url: 'https://worker.example.test/api/v1/widget/upcoming', method: 'GET', timeoutInterval: 12, headers: { Authorization: 'Bearer widget-read-token', Accept: 'application/json' } });
+    expect(parseUpcomingWidgetPayload(payload).appearance?.refreshMinutes).toBe(45);
+    expect(normalizeWidgetRefreshMinutes(45)).toBe(45);
+    expect(nextRefreshDate(new Date('2026-08-13T00:00:00.000Z'), 45).toISOString())
+      .toBe('2026-08-13T00:45:00.000Z');
+  });
+
+  it('keeps old payloads without appearance preferences compatible', () => {
+    const legacyPayload: UpcomingWidgetResponse = {
+      periods: payload.periods,
+      generatedAt: payload.generatedAt,
+    };
+    const parsed = parseUpcomingWidgetPayload(legacyPayload);
+    expect(parsed.appearance).toBeUndefined();
   });
 
   it('surfaces Scriptable HTTP authentication failures with the response body', async () => {

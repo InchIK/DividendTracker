@@ -118,10 +118,20 @@ export function validateSettings(settings) {
   requiredString(d1.databaseName, 'cloudflare.d1.databaseName', /^[A-Za-z0-9_-]+$/);
   if (d1.databaseId && !/^[0-9a-f-]{36}$/i.test(d1.databaseId)) throw new Error('cloudflare.d1.databaseId 格式錯誤。');
   if (!['weur', 'eeur', 'apac', 'oc', 'wnam', 'enam'].includes(d1.location)) throw new Error('cloudflare.d1.location 格式錯誤。');
-  if (crons.dailyDividendsTaipei1335Utc !== '35 5 * * *') {
+  if (crons.scheduler !== undefined) {
+    if (crons.scheduler !== '* * * * *') {
+      throw new Error('cloudflare.crons.scheduler must be exactly * * * * *');
+    }
+  } else if (crons.dailyDividendsTaipei1335Utc !== '35 5 * * *') {
     throw new Error('每日台北時間 13:35 的 Cron 必須是 35 5 * * *。');
   }
-  requiredString(crons.hourlyPrices, 'cloudflare.crons.hourlyPrices');
+  if (crons.scheduler === undefined) {
+    const legacyScheduler = crons.hourlyPrices === '0 * * * *'
+      && crons.dailyDividendsTaipei1335Utc === '35 5 * * *';
+    if (!legacyScheduler) {
+      throw new Error('cloudflare.crons.scheduler must be exactly * * * * *');
+    }
+  }
 
   for (const [key, value] of Object.entries(sources)) {
     requiredString(value, `sources.${key}`, /^https:\/\//);
@@ -166,7 +176,7 @@ export function generatedWrangler(settings) {
     secrets: { required: ['TOKEN_ENCRYPTION_KEY'] },
     d1_databases: [d1],
     triggers: {
-      crons: [settings.cloudflare.crons.hourlyPrices, settings.cloudflare.crons.dailyDividendsTaipei1335Utc],
+      crons: ['* * * * *'],
     },
     observability: {
       enabled: settings.cloudflare.observability,

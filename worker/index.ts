@@ -12,13 +12,14 @@
  *   GET  /api/v1/prices                      — selected latest prices (admin)
  *   GET  /api/v1/widget/current              — legacy one-period widget (per-user Widget credential)
  *   GET  /api/v1/widget/upcoming             — current/next periods (per-user Widget credential)
- *   GET/PUT /api/v1/widget/settings          — Widget solid/gradient background (admin)
+ *   GET/PUT /api/v1/widget/settings          — Widget appearance/preferences (user)
  *   GET  /api/v1/dashboard                   — period dashboard (admin)
  *   GET  /api/v1/dividends                   — dividend events (admin)
  *   POST /api/v1/dividends/manual            — manual verified entry (admin)
  *   POST /api/v1/dividends/:eventKey/unlock — unlock (admin)
  *   POST /api/v1/sync                        — trigger dividend sync (admin)
- *   GET  /api/v1/sync/runs                   — sync history (admin)
+ *   GET  /api/v1/sync/runs                   — sync history (user)
+ *   GET/PUT /api/v1/sync/settings            — daily schedule (user/owner)
  *   GET  /api/v1/sources/status              — source freshness (admin)
  */
 import { Hono } from 'hono';
@@ -36,7 +37,8 @@ import { widgetUpcomingRoutes } from './routes/widget-upcoming';
 import { widgetSettingsRoutes } from './routes/widget-settings';
 import { runSync } from './sync/run-sync';
 import { runPriceSync } from './sync/run-price-sync';
-import { scheduledJobForCron } from './sync/scheduled-job';
+import { decideScheduledJobs } from './sync/scheduled-job';
+import { claimDailySyncDate, getSyncSchedule } from './sync/schedule-settings';
 import { authRoutes } from './routes/auth';
 import type { AuthContextEnv } from './auth/session';
 
@@ -119,31 +121,71 @@ export default {
 
   // ── Cron trigger handler ────────────────────────────────────────────────────
   async scheduled(
-    event: ScheduledEvent,
+    event: ScheduledController,
     env: Env,
+    ctx: ExecutionContext,
   ): Promise<void> {
-    if (scheduledJobForCron(event.cron) === 'prices') {
-      console.log('Hourly selected-symbol price sync triggered at', event.scheduledTime);
-      const result = await runPriceSync(env);
-      console.log(
-        `Price sync ${result.outcome}: ${result.persisted}/${result.selected} selected instruments persisted`,
-      );
-      if (result.errors.length > 0) console.error('Price sync errors:', result.errors.join('; '));
-      return;
+    void ctx;
+    const schedule = await getSyncSchedule(env.DB);
+    const decision = decideScheduledJobs(event.scheduledTime, schedule.dailyTime);
+    if (!decision.dailyDue && !decision.hourlyPriceDue) return;
+
+    let dailyClaimed = false;
+    if (decision.dailyDue) {
+      dailyClaimed = await claimDailySyncDate(env.DB, decision.taipeiDate);
+      console.log(JSON.stringify({
+        message: 'daily sync claim',
+        job: 'daily',
+        outcome: dailyClaimed ? 'claimed' : 'already_claimed',
+        taipeiDate: decision.taipeiDate,
+      }));
+      if (dailyClaimed) {
+        const result = await runSync(env, 'cron');
+        console.log(JSON.stringify({
+          message: 'daily sync completed',
+          job: 'daily',
+          outcome: result.status,
+          observationsApplied: result.observationsApplied,
+          eventsChanged: result.eventsChanged,
+        }));
+        if (result.errors.length > 0) console.error(JSON.stringify({
+          message: 'daily sync errors',
+          job: 'daily',
+          errors: result.errors,
+        }));
+      }
     }
 
-    console.log('Daily 13:35 Asia/Taipei sync triggered at', new Date().toISOString());
-    const result = await runSync(env, 'cron');
-    console.log(
-      `Sync ${result.status}: ${result.observationsApplied} observations, ${result.eventsChanged} events changed`,
-    );
-    if (result.errors.length > 0) {
-      console.error('Sync errors:', result.errors.join('; '));
+    // A daily run includes exactly one price pass.  If it was already claimed
+    // by another invocation at an hour boundary, retain the hourly price pass.
+    if (decision.hourlyPriceDue && (!decision.dailyDue || !dailyClaimed)) {
+      const result = await runPriceSync(env);
+      console.log(JSON.stringify({
+        message: 'price sync completed',
+        job: 'hourly_prices',
+        outcome: result.outcome,
+        persisted: result.persisted,
+        selected: result.selected,
+      }));
+      if (result.errors.length > 0) console.error(JSON.stringify({
+        message: 'price sync errors',
+        job: 'hourly_prices',
+        errors: result.errors,
+      }));
+    } else if (dailyClaimed) {
+      const result = await runPriceSync(env);
+      console.log(JSON.stringify({
+        message: 'price sync completed',
+        job: 'daily_prices',
+        outcome: result.outcome,
+        persisted: result.persisted,
+        selected: result.selected,
+      }));
+      if (result.errors.length > 0) console.error(JSON.stringify({
+        message: 'price sync errors',
+        job: 'daily_prices',
+        errors: result.errors,
+      }));
     }
-    const prices = await runPriceSync(env);
-    console.log(
-      `Daily price sync ${prices.outcome}: ${prices.persisted}/${prices.selected} instruments persisted`,
-    );
-    if (prices.errors.length > 0) console.error('Price sync errors:', prices.errors.join('; '));
   },
-};
+} satisfies ExportedHandler<Env>;

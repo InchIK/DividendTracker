@@ -1,7 +1,7 @@
 /** Download and configure a fresh, installation-scoped Scriptable Widget. */
 import { useState, useCallback, useEffect } from 'react';
 import { api } from '@/api/client';
-import type { WidgetBackgroundMode } from '@/api/client';
+import type { WidgetBackgroundMode, WidgetSortMode } from '@/api/client';
 import { customizeWidgetScript, normalizeWidgetDownloadConfig } from '@/lib/widget-script';
 
 const QUICK_COLORS: { label: string; startColor: string; endColor: string }[] = [
@@ -12,6 +12,17 @@ const QUICK_COLORS: { label: string; startColor: string; endColor: string }[] = 
 ];
 
 const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
+const MIN_REFRESH_MINUTES = 15;
+const MAX_REFRESH_MINUTES = 1440;
+const DEFAULT_REFRESH_MINUTES = 180;
+
+const SORT_MODE_LABELS: Record<WidgetSortMode, string> = {
+  dividend_desc: '預估股息最高',
+  random: '每次更新隨機',
+  price_desc: '股價最高',
+  featured: '自訂第一個顯示',
+};
+const SORT_MODES = ['dividend_desc', 'random', 'price_desc', 'featured'] as const;
 
 function colorPickerValue(value: string): string {
   return HEX_COLOR_PATTERN.test(value) ? value : '#000000';
@@ -39,42 +50,101 @@ export function WidgetSetupPage() {
   const [themeLoading, setThemeLoading] = useState(true);
   const [themeSaving, setThemeSaving] = useState(false);
   const [themeMessage, setThemeMessage] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<WidgetSortMode>('dividend_desc');
+  const [featuredInstrumentId, setFeaturedInstrumentId] = useState<string | null>(null);
+  const [refreshMinutes, setRefreshMinutes] = useState(DEFAULT_REFRESH_MINUTES);
+  const [watchlistItems, setWatchlistItems] = useState<Awaited<ReturnType<typeof api.getWatchlist>>['items']>([]);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesMessage, setPreferencesMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     void api.getWidgetSettings()
       .then((appearance) => {
-        if (!active) return;
-        setBackgroundMode(appearance.mode ?? 'gradient');
-        setStartColor(appearance.startColor || '#071426');
-        setEndColor(appearance.endColor || appearance.startColor || '#0F766E');
+        if (active) {
+          setBackgroundMode(appearance.mode ?? 'gradient');
+          setStartColor(appearance.startColor || '#071426');
+          setEndColor(appearance.endColor || appearance.startColor || '#0F766E');
+          setSortMode(appearance.sortMode ?? 'dividend_desc');
+          setFeaturedInstrumentId(appearance.featuredInstrumentId ?? null);
+          setRefreshMinutes(Number.isInteger(appearance.refreshMinutes)
+            && appearance.refreshMinutes >= MIN_REFRESH_MINUTES
+            && appearance.refreshMinutes <= MAX_REFRESH_MINUTES
+            ? appearance.refreshMinutes
+            : DEFAULT_REFRESH_MINUTES);
+        }
       })
       .catch((error: unknown) => {
         if (active) setThemeMessage(error instanceof Error ? error.message : '無法載入外觀設定。');
       })
       .finally(() => { if (active) setThemeLoading(false); });
+    void api.getWatchlist()
+      .then((watchlist) => {
+        if (active) setWatchlistItems(watchlist.items);
+      })
+      .catch((error: unknown) => {
+        if (active) setPreferencesMessage(error instanceof Error ? error.message : '無法載入排列與更新設定。');
+      })
+      .finally(() => { if (active) setPreferencesLoading(false); });
     return () => { active = false; };
   }, []);
+
+  const enabledWatchlistItems = watchlistItems.filter((item) => item.enabled);
+  const refreshValid = Number.isInteger(refreshMinutes)
+    && refreshMinutes >= MIN_REFRESH_MINUTES
+    && refreshMinutes <= MAX_REFRESH_MINUTES;
+  const featuredValid = sortMode !== 'featured'
+    || enabledWatchlistItems.some((item) => item.instrumentId === featuredInstrumentId);
+
+  const settingsPayload = useCallback(() => ({
+    mode: backgroundMode,
+    startColor,
+    endColor: backgroundMode === 'solid' ? startColor : endColor,
+    sortMode,
+    featuredInstrumentId: sortMode === 'featured' ? featuredInstrumentId : null,
+    refreshMinutes,
+  }), [backgroundMode, endColor, featuredInstrumentId, refreshMinutes, sortMode, startColor]);
 
   const handleThemeSave = useCallback(async () => {
     setThemeSaving(true);
     setThemeMessage(null);
     try {
-      const saved = await api.updateWidgetSettings({
-        mode: backgroundMode,
-        startColor,
-        endColor: backgroundMode === 'solid' ? startColor : endColor,
-      });
+      if (!refreshValid || !featuredValid) {
+        setThemeMessage('請先完成有效的排列與更新設定。');
+        return;
+      }
+      const saved = await api.updateWidgetSettings(settingsPayload());
       setBackgroundMode(saved.mode);
       setStartColor(saved.startColor);
       setEndColor(saved.endColor);
-      setThemeMessage('外觀設定已儲存，之後下載的 Widget 會套用。');
+      setSortMode(saved.sortMode);
+      setFeaturedInstrumentId(saved.featuredInstrumentId);
+      setRefreshMinutes(saved.refreshMinutes);
+      setThemeMessage('外觀設定已儲存，既有 Widget 下次更新時就會套用。');
     } catch (error) {
       setThemeMessage(error instanceof Error ? error.message : '外觀設定儲存失敗。');
     } finally {
       setThemeSaving(false);
     }
-  }, [backgroundMode, endColor, startColor]);
+  }, [featuredValid, refreshValid, settingsPayload]);
+
+  const handlePreferencesSave = useCallback(async () => {
+    if (!refreshValid || !featuredValid || preferencesSaving) return;
+    setPreferencesSaving(true);
+    setPreferencesMessage(null);
+    try {
+      const saved = await api.updateWidgetSettings(settingsPayload());
+      setSortMode(saved.sortMode);
+      setFeaturedInstrumentId(saved.featuredInstrumentId);
+      setRefreshMinutes(saved.refreshMinutes);
+      setPreferencesMessage('排列與更新設定已套用，Widget 下次更新時生效。');
+    } catch (error) {
+      setPreferencesMessage(error instanceof Error ? error.message : '排列與更新設定儲存失敗。');
+    } finally {
+      setPreferencesSaving(false);
+    }
+  }, [featuredValid, preferencesSaving, refreshValid, settingsPayload]);
 
   const handleDownload = useCallback(async () => {
     if (!tokenPassword.trim() || downloading) return;
@@ -197,7 +267,89 @@ export function WidgetSetupPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">2. 下載全新 Widget</h2>
+        <h2 className="text-lg font-semibold">2. 排列與更新</h2>
+        <div className="space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+          <label className="block space-y-2 text-sm font-medium">
+            <span>Widget 排列方式</span>
+            <select
+              aria-label="Widget 排列方式"
+              value={sortMode}
+              disabled={preferencesLoading || preferencesSaving}
+              onChange={(event) => {
+                const nextMode = SORT_MODES.find((mode) => mode === event.target.value) ?? 'dividend_desc';
+                setSortMode(nextMode);
+                if (nextMode !== 'featured') setFeaturedInstrumentId(null);
+              }}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
+            >
+              {SORT_MODES.map((mode) => (
+                <option key={mode} value={mode}>{SORT_MODE_LABELS[mode]}</option>
+              ))}
+            </select>
+          </label>
+
+          {sortMode === 'featured' && (
+            <label className="block space-y-2 text-sm font-medium">
+              <span>自訂第一個顯示的標的</span>
+              <select
+                aria-label="自訂第一個顯示的標的"
+                value={featuredInstrumentId ?? ''}
+                disabled={preferencesLoading || preferencesSaving || enabledWatchlistItems.length === 0}
+                onChange={(event) => setFeaturedInstrumentId(event.target.value || null)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
+              >
+                <option value="">請選擇標的</option>
+                {enabledWatchlistItems.map((item) => (
+                  <option key={item.instrumentId} value={item.instrumentId}>
+                    {item.code} {item.displayName}
+                  </option>
+                ))}
+              </select>
+              {enabledWatchlistItems.length === 0 && (
+                <p className="text-sm text-amber-700 dark:text-amber-300">
+                  目前沒有可選的啟用標的，請先到自選清單啟用標的。
+                </p>
+              )}
+            </label>
+          )}
+
+          <label className="block space-y-2 text-sm font-medium">
+            <span>Widget 更新間隔（分鐘）</span>
+            <input
+              aria-label="Widget 更新間隔（分鐘）"
+              type="number"
+              min={MIN_REFRESH_MINUTES}
+              max={MAX_REFRESH_MINUTES}
+              step={15}
+              value={refreshMinutes}
+              disabled={preferencesLoading || preferencesSaving}
+              onChange={(event) => setRefreshMinutes(Number(event.target.value))}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-900"
+            />
+            <span className="text-xs font-normal opacity-70">
+              Scriptable 會以此設定最早更新時間，實際更新時機由 iOS 決定。
+            </span>
+          </label>
+        </div>
+        {!refreshValid && (
+          <p className="text-sm text-red-600 dark:text-red-400">更新間隔必須是 15 至 1440 的整數分鐘。</p>
+        )}
+        {!featuredValid && (
+          <p className="text-sm text-red-600 dark:text-red-400">請選擇仍在啟用自選清單中的自訂標的。</p>
+        )}
+        <button
+          type="button"
+          onClick={() => { void handlePreferencesSave(); }}
+          disabled={preferencesLoading || preferencesSaving || !refreshValid || !featuredValid}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {preferencesSaving ? '儲存中…' : '儲存排列與更新'}
+        </button>
+        {preferencesMessage && <div role="status" className="rounded-lg bg-slate-100 p-3 text-sm text-slate-700 dark:bg-slate-800 dark:text-slate-200">{preferencesMessage}</div>}
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">3. 下載全新 Widget</h2>
         <p className="text-sm opacity-70">每次下載都會建立全新的 Widget Token 與安裝識別碼；所有先前下載的 Widget 會立即停止運作。下載時需要輸入目前帳號密碼。</p>
         <label className="block space-y-2 text-sm font-medium">
           <span>目前網站 Origin（唯讀）</span>
@@ -212,7 +364,7 @@ export function WidgetSetupPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">3. Scriptable 安裝</h2>
+        <h2 className="text-lg font-semibold">4. Scriptable 安裝</h2>
         <ol className="list-decimal space-y-1 pl-5 text-sm opacity-80">
           <li>下載完成後，在 iPhone 的「檔案」開啟 DividendTrackerWidget.js。</li>
           <li>選擇分享至 Scriptable，儲存並加入主畫面 Widget。</li>

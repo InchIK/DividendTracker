@@ -20,8 +20,7 @@
       "location": "apac"
     },
     "crons": {
-      "hourlyPrices": "0 * * * *",
-      "dailyDividendsTaipei1335Utc": "35 5 * * *"
+      "scheduler": "* * * * *"
     },
     "observability": true
   },

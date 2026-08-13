@@ -1,11 +1,61 @@
 import { describe, expect, it } from 'vitest';
 
-import { DAILY_REFRESH_CRON, HOURLY_PRICE_CRON, scheduledJobForCron } from '../../worker/sync/scheduled-job';
+import { decideScheduledJobs, SCHEDULER_CRON } from '../../worker/sync/scheduled-job';
 
-describe('scheduled job routing', () => {
-  it('routes the hourly expression only to selected-symbol price synchronization', () => {
-    expect(scheduledJobForCron(HOURLY_PRICE_CRON)).toBe('prices');
-    expect(DAILY_REFRESH_CRON).toBe('35 5 * * *');
-    expect(scheduledJobForCron(DAILY_REFRESH_CRON)).toBe('daily');
+const atUtc = (value: string): number => Date.parse(`${value}Z`);
+
+describe('minute scheduler decision', () => {
+  it('uses a single Cloudflare cron expression', () => {
+    expect(SCHEDULER_CRON).toBe('* * * * *');
   });
+
+  it('converts UTC to Taipei time and marks the daily minute', () => {
+    expect(decideScheduledJobs(atUtc('2026-08-13T05:35:00'), '13:35')).toMatchObject({
+      dailyDue: true,
+      hourlyPriceDue: false,
+      taipeiDate: '2026-08-13',
+      taipeiTime: '13:35',
+    });
+  });
+
+  it('marks every local整點 for hourly prices', () => {
+    expect(decideScheduledJobs(atUtc('2026-08-13T00:00:00'), '13:35')).toMatchObject({
+      dailyDue: false,
+      hourlyPriceDue: true,
+      taipeiDate: '2026-08-13',
+      taipeiTime: '08:00',
+    });
+  });
+
+  it('allows daily and hourly jobs to be due on the same minute', () => {
+    expect(decideScheduledJobs(atUtc('2026-08-13T05:00:00'), '13:00')).toMatchObject({
+      dailyDue: true,
+      hourlyPriceDue: true,
+      taipeiDate: '2026-08-13',
+    });
+  });
+
+  it('returns no job when the minute is neither daily nor整點', () => {
+    expect(decideScheduledJobs(atUtc('2026-08-13T05:34:00'), '13:35')).toMatchObject({
+      dailyDue: false,
+      hourlyPriceDue: false,
+      taipeiDate: '2026-08-13',
+    });
+  });
+
+  it('handles the Taipei midnight date boundary', () => {
+    expect(decideScheduledJobs(atUtc('2026-08-13T16:00:00'), '13:35')).toMatchObject({
+      dailyDue: false,
+      hourlyPriceDue: true,
+      taipeiDate: '2026-08-14',
+      taipeiTime: '00:00',
+    });
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects an invalid scheduled timestamp: %s',
+    (scheduledTime) => {
+      expect(() => decideScheduledJobs(scheduledTime, '13:35')).toThrow('finite');
+    },
+  );
 });

@@ -22,6 +22,13 @@ import type {
   WidgetAppearance,
   WidgetResponse,
   WidgetTheme,
+  WidgetSortMode,
+} from './formatter';
+import {
+  DEFAULT_WIDGET_REFRESH_MINUTES,
+  DEFAULT_WIDGET_SORT_MODE,
+  MAX_WIDGET_REFRESH_MINUTES,
+  MIN_WIDGET_REFRESH_MINUTES,
 } from './formatter';
 
 /** Error raised by `fetchWidgetData` when the API is unreachable or returns non-2xx. */
@@ -133,6 +140,7 @@ const VALID_STATUSES = new Set<WidgetResponse['status']>([
 ]);
 const VALID_THEMES = new Set<WidgetTheme>(['ocean', 'midnight', 'sunset', 'forest']);
 const VALID_BACKGROUND_MODES = new Set<WidgetBackgroundMode>(['solid', 'gradient']);
+const VALID_SORT_MODES = new Set<WidgetSortMode>(['dividend_desc', 'random', 'price_desc', 'featured']);
 const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -289,12 +297,47 @@ function validateAppearance(value: unknown): WidgetAppearance {
       || !HEX_COLOR_PATTERN.test(value.endColor))) {
     throw new Error('upcoming response has invalid appearance');
   }
+  let mode: WidgetBackgroundMode = 'gradient';
+  let startColor = '#071426';
+  let endColor = '#0F766E';
+  if (hasCustomBackground) {
+    mode = value.mode as WidgetBackgroundMode;
+    startColor = value.startColor as string;
+    endColor = value.endColor as string;
+  }
+
+  const sortMode = value.sortMode === undefined ? DEFAULT_WIDGET_SORT_MODE : value.sortMode;
+  if (typeof sortMode !== 'string' || !VALID_SORT_MODES.has(sortMode as WidgetSortMode)) {
+    throw new Error('upcoming response has invalid appearance');
+  }
+  const featuredInstrumentId = value.featuredInstrumentId === undefined
+    ? null
+    : value.featuredInstrumentId;
+  if (featuredInstrumentId !== null
+    && (typeof featuredInstrumentId !== 'string' || featuredInstrumentId.trim().length === 0)) {
+    throw new Error('upcoming response has invalid appearance');
+  }
+  if (sortMode === 'featured' && featuredInstrumentId === null) {
+    throw new Error('upcoming response has invalid appearance');
+  }
+  const refreshMinutes = value.refreshMinutes === undefined
+    ? DEFAULT_WIDGET_REFRESH_MINUTES
+    : value.refreshMinutes;
+  if (typeof refreshMinutes !== 'number'
+    || !Number.isInteger(refreshMinutes)
+    || refreshMinutes < MIN_WIDGET_REFRESH_MINUTES
+    || refreshMinutes > MAX_WIDGET_REFRESH_MINUTES) {
+    throw new Error('upcoming response has invalid appearance');
+  }
   return {
     theme: value.theme as WidgetTheme,
     updatedAt: value.updatedAt,
-    ...(value.mode === undefined ? {} : { mode: value.mode as WidgetBackgroundMode }),
-    ...(value.startColor === undefined ? {} : { startColor: value.startColor as string }),
-    ...(value.endColor === undefined ? {} : { endColor: value.endColor as string }),
+    mode,
+    startColor,
+    endColor,
+    sortMode: sortMode as WidgetSortMode,
+    featuredInstrumentId,
+    refreshMinutes,
   };
 }
 

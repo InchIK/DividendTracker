@@ -6,6 +6,7 @@
 export {
   authUserId,
   requireUser as requireAdmin,
+  requireOwner,
   requireWidget,
   requireWidgetOrUser as requireAnyAuth,
   type AuthContextEnv as AuthEnv,

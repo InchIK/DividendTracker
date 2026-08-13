@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type SyncRunDTO, type SourcesStatusResponse } from "@/api/client";
+import {
+  api,
+  type SyncRunDTO,
+  type SourcesStatusResponse,
+  type SyncScheduleDTO,
+} from "@/api/client";
 import { formatDateTime } from "@/lib/format";
 import { FreshnessCard } from "@/components/FreshnessCard";
 
@@ -17,9 +22,13 @@ const STATUS_LABEL: Record<SyncRunDTO["status"], string> = {
   failed: "失敗",
 };
 
-export function SyncPage(): React.JSX.Element {
+export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }): React.JSX.Element {
   const [runs, setRuns] = useState<SyncRunDTO[]>([]);
   const [sources, setSources] = useState<SourcesStatusResponse | null>(null);
+  const [schedule, setSchedule] = useState<SyncScheduleDTO | null>(null);
+  const [scheduleInput, setScheduleInput] = useState("13:35");
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleMsg, setScheduleMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -36,6 +45,14 @@ export function SyncPage(): React.JSX.Element {
       ]);
       setRuns(r.items ?? []);
       setSources(s);
+      try {
+        const configuredSchedule = await api.getSyncSettings();
+        setSchedule(configuredSchedule);
+        setScheduleInput(configuredSchedule.dailyTime);
+      } catch (scheduleError) {
+        setSchedule(null);
+        setError(scheduleError instanceof Error ? scheduleError.message : "載入自動同步時間失敗");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "載入同步紀錄失敗");
     } finally {
@@ -58,6 +75,23 @@ export function SyncPage(): React.JSX.Element {
       setError(err instanceof Error ? err.message : "觸發同步失敗");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const saveSchedule = async () => {
+    if (!canManageSchedule || scheduleSaving) return;
+    setScheduleSaving(true);
+    setScheduleMsg(null);
+    setError(null);
+    try {
+      const updated = await api.updateSyncSettings(scheduleInput);
+      setSchedule(updated);
+      setScheduleInput(updated.dailyTime);
+      setScheduleMsg("自動同步時間已儲存。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "無法儲存自動同步時間。");
+    } finally {
+      setScheduleSaving(false);
     }
   };
 
@@ -103,6 +137,54 @@ export function SyncPage(): React.JSX.Element {
           ⚠️ {error}
         </div>
       )}
+
+      <section
+        aria-labelledby="sync-schedule-title"
+        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 p-4 shadow-sm"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 id="sync-schedule-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              自動同步時間
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              每日依台北時間執行同步；行情資料仍會在每個整點更新。
+            </p>
+          </div>
+          <div className="flex items-end gap-2">
+            <div>
+              <label htmlFor="daily-sync-time" className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                Asia/Taipei
+              </label>
+              <input
+                id="daily-sync-time"
+                type="time"
+                value={scheduleInput}
+                onChange={(event) => setScheduleInput(event.target.value)}
+                disabled={!canManageSchedule || scheduleSaving}
+                aria-describedby="daily-sync-help"
+                className="mt-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => { void saveSchedule(); }}
+              disabled={!canManageSchedule || scheduleSaving || schedule === null && scheduleInput.length === 0}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {scheduleSaving ? "儲存中…" : "儲存"}
+            </button>
+          </div>
+        </div>
+        <p id="daily-sync-help" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          {canManageSchedule ? "只有擁有者可修改此時間。" : "僅擁有者可修改自動同步時間。"}
+        </p>
+        {scheduleMsg && (
+          <p role="status" aria-live="polite" className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">
+            {scheduleMsg}
+          </p>
+        )}
+      </section>
 
       {/* Source status */}
       <section>

@@ -5,6 +5,7 @@
  */
 import { getCurrentPeriodInTaipei, yearMonthPrefix } from './date';
 import { calculateAmount, formatMicros, formatMicrosWithCommas } from './money';
+import type { WidgetSortMode } from './widget-appearance';
 import type { CanonicalEvent } from './reconciliation';
 
 export interface PortfolioEntry {
@@ -73,6 +74,19 @@ export interface WidgetResponse {
   generatedAt: string;
 }
 
+export interface WidgetBuildOptions {
+  sortMode?: WidgetSortMode;
+  featuredInstrumentId?: string | null;
+  random?: () => number;
+}
+
+interface SortableWidgetItem {
+  item: WidgetItem;
+  amountMicros: bigint | null;
+  priceMicros: bigint | null;
+  originalIndex: number;
+}
+
 const SOURCE_LABELS: Record<string, string> = {
   manual_verified: '官方人工覆核',
   sitca_open_data: '政府開放資料',
@@ -80,6 +94,80 @@ const SOURCE_LABELS: Record<string, string> = {
   etfortune_html: 'TWSE e添富',
   finmind_dividend: 'FinMind（TWSE/MOPS）',
 };
+
+function parseMicros(value: string | null | undefined): bigint | null {
+  if (value === null || value === undefined || !/^-?\d+$/.test(value)) return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function compareTieBreakers(a: SortableWidgetItem, b: SortableWidgetItem): number {
+  const payDateA = a.item.payDate ?? '\uffff';
+  const payDateB = b.item.payDate ?? '\uffff';
+  if (payDateA < payDateB) return -1;
+  if (payDateA > payDateB) return 1;
+  if (a.item.code < b.item.code) return -1;
+  if (a.item.code > b.item.code) return 1;
+  return a.originalIndex - b.originalIndex;
+}
+
+function compareNullableDescending(
+  a: bigint | null,
+  b: bigint | null,
+): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  if (a > b) return -1;
+  if (a < b) return 1;
+  return 0;
+}
+
+function sortWidgetItems(
+  entries: SortableWidgetItem[],
+  options: WidgetBuildOptions,
+): SortableWidgetItem[] {
+  const sortMode = options.sortMode ?? 'dividend_desc';
+  if (sortMode === 'random') {
+    const random = options.random ?? Math.random;
+    for (let index = entries.length - 1; index > 0; index -= 1) {
+      const sampled = random();
+      const normalized = Number.isFinite(sampled)
+        ? Math.max(0, Math.min(sampled, 0.9999999999999999))
+        : 0;
+      const swapIndex = Math.floor(normalized * (index + 1));
+      const current = entries[index];
+      const replacement = entries[swapIndex];
+      if (current && replacement) {
+        entries[index] = replacement;
+        entries[swapIndex] = current;
+      }
+    }
+    return entries;
+  }
+
+  return entries.sort((a, b) => {
+    if (sortMode === 'featured') {
+      const featuredId = options.featuredInstrumentId;
+      const aFeatured = featuredId !== null && featuredId !== undefined
+        && a.item.instrumentId === featuredId;
+      const bFeatured = featuredId !== null && featuredId !== undefined
+        && b.item.instrumentId === featuredId;
+      if (aFeatured !== bFeatured) return aFeatured ? -1 : 1;
+      const byDividend = compareNullableDescending(a.amountMicros, b.amountMicros);
+      return byDividend === 0 ? compareTieBreakers(a, b) : byDividend;
+    }
+    if (sortMode === 'price_desc') {
+      const byPrice = compareNullableDescending(a.priceMicros, b.priceMicros);
+      return byPrice === 0 ? compareTieBreakers(a, b) : byPrice;
+    }
+    const byDividend = compareNullableDescending(a.amountMicros, b.amountMicros);
+    return byDividend === 0 ? compareTieBreakers(a, b) : byDividend;
+  });
+}
 
 export function buildWidgetResponse(
   events: CanonicalEvent[],
@@ -89,6 +177,7 @@ export function buildWidgetResponse(
   freshnessStale = false,
   lastSuccessfulSync: string | null = null,
   prices: WidgetPriceEntry[] = [],
+  options: WidgetBuildOptions = {},
 ): WidgetResponse {
   const period = year && month ? { year, month } : getCurrentPeriodInTaipei();
   const prefix = yearMonthPrefix(period.year, period.month);
@@ -101,8 +190,7 @@ export function buildWidgetResponse(
   const portfolioMap = new Map(portfolio.map((p) => [p.instrumentId ?? `twse:${p.code}`, p]));
   const priceMap = new Map(prices.map((price) => [price.instrumentId, price]));
 
-  const items: WidgetItem[] = [];
-  const itemAmounts: (bigint | null)[] = [];
+  const entries: SortableWidgetItem[] = [];
   let totalMicros = 0n;
   let anyItemHasAmount = false;
   let anyItemPending = false;
@@ -112,6 +200,10 @@ export function buildWidgetResponse(
     const port = portfolioMap.get(instrumentId);
     if (!port?.enabled) continue;
     const price = priceMap.get(instrumentId);
+    const priceMicros = parseMicros(price?.latestPriceMicros)
+      ?? parseMicros(price?.previousCloseMicros);
+    const previousCloseMicros = parseMicros(price?.previousCloseMicros);
+    const currentTradeMicros = parseMicros(price?.latestPriceMicros);
 
     const shares = event.eligibleSharesOverride ?? port.currentShares;
     if (shares === 0) continue;
@@ -130,7 +222,7 @@ export function buildWidgetResponse(
       anyItemPending = true;
     }
 
-    items.push({
+    const item: WidgetItem = {
       instrumentId,
       market: port.market ?? (instrumentId.startsWith('tpex:') ? 'tpex' : 'twse'),
       kind: port.kind ?? 'etf',
@@ -141,11 +233,11 @@ export function buildWidgetResponse(
       dividendPerUnit: event.dividendMicros !== null ? formatMicros(event.dividendMicros) : null,
       payDate: event.payDate,
       estimatedGrossAmount: amountMicros !== null ? formatMicros(amountMicros) : null,
-      previousClose: price?.previousCloseMicros !== null && price?.previousCloseMicros !== undefined
-        ? formatMicros(BigInt(price.previousCloseMicros))
+      previousClose: previousCloseMicros !== null
+        ? formatMicros(previousCloseMicros)
         : null,
-      currentTrade: price?.latestPriceMicros !== null && price?.latestPriceMicros !== undefined
-        ? formatMicros(BigInt(price.latestPriceMicros))
+      currentTrade: currentTradeMicros !== null
+        ? formatMicros(currentTradeMicros)
         : null,
       tradeDate: price?.tradeDate ?? null,
       tradeTime: price?.tradeTime ?? null,
@@ -156,9 +248,18 @@ export function buildWidgetResponse(
         label: SOURCE_LABELS[event.canonicalSourceKind] ?? event.canonicalSourceKind,
       },
       hasConflict: event.status === 'conflict',
+    };
+    entries.push({
+      item,
+      amountMicros,
+      priceMicros,
+      originalIndex: entries.length,
     });
-    itemAmounts.push(amountMicros);
   }
+
+  const orderedEntries = sortWidgetItems(entries, options);
+  const items = orderedEntries.map((entry) => entry.item);
+  const itemAmounts = orderedEntries.map((entry) => entry.amountMicros);
 
   // Determine status
   let status: WidgetResponse['status'] = 'ok';

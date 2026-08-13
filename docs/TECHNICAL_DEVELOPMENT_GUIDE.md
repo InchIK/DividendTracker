@@ -19,8 +19,9 @@
 
 ## 更新與 migration
 
-- 每小時更新價格。
-- 每日台北時間 13:35（UTC cron `35 5 * * *`）更新股利資料。
+- Cloudflare 以每分鐘 Cron 喚醒 scheduler；非到期分鐘不讀取上游。
+- 每個整點更新價格。
+- owner 可在 D1 設定每日完整同步的台北時間，預設 13:35；原子日期 claim 確保同一天最多執行一次。
 - 使用者設定當下立即回補至少一年資料。
 - 支援全台 ETF 與股票的動態設定。
 
@@ -44,4 +45,6 @@ Build 會先清理產物，再執行 tracked/build privacy scan。掃描器是�
 
 ## Widget 流程
 
-Dashboard 每次下載都驗證目前密碼、輪替新 Token、產生新 installation ID、嵌入目前 Origin，並在連線測試成功後才下載。舊 Widget 立即失效；頁面不顯示或複製 Token，Scriptable 也不會使用舊 Keychain/cache。更換設定必須重新下載。
+Dashboard 每次下載都驗證目前密碼、輪替新 Token、產生新 installation ID、嵌入目前 Origin，並在連線測試成功後才下載。舊 Widget 立即失效；頁面不顯示或複製 Token，Scriptable 也不會使用舊 Keychain/cache。
+
+Widget 背景、排列方式（預估股息、隨機、股價或指定標的置頂）與 15～1440 分鐘更新間隔都保存在每位使用者的 D1 設定，既有 Widget 會在下次 API 更新時套用。`refreshAfterDate` 只表示 Scriptable 請求的最早更新時間，iOS 可以延後實際喚醒。

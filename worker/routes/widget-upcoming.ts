@@ -68,6 +68,10 @@ widgetUpcomingRoutes.get('/api/v1/widget/upcoming', async (c) => {
       stale,
       lastSync,
       priceEntries,
+      {
+        sortMode: appearance.sortMode,
+        featuredInstrumentId: appearance.featuredInstrumentId,
+      },
     ),
     appearance,
   });

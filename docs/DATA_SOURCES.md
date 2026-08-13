@@ -64,7 +64,7 @@
 - **主要欄位**：`Date`、`SecuritiesCompanyCode`、`Close`。
 - **限制**：空價、`-` 或 `--` 代表沒有可用成交，不是價格 `0`。
 
-價格 Cron 為 `0 * * * *`。同步會先讀取 selected instruments，依市場查官方盤後來源，再以 TWSE MIS 補最新成交。`latest_prices` 與 `price_observations` 都只能包含 selected instruments；來源失敗時保留 last-good。
+Worker 使用每分鐘 scheduler Cron；只有每個整點才執行價格同步。同步會先讀取 selected instruments，依市場查官方盤後來源，再以 TWSE MIS 補最新成交。`latest_prices` 與 `price_observations` 都只能包含 selected instruments；來源失敗時保留 last-good。
 
 ## 配息來源
 
@@ -108,7 +108,7 @@
 - **優先級**：70；ETF 的 e添富／SITCA 官方資料仍可覆蓋，股票則用來補足 TWSE 除權息預告沒有的發放日。
 - **限制**：無 Token 的公開介面不允許一次下載全市場，因此只查使用者已設定代碼；同一除息日若有修訂列，採公告日期／時間最新版本，零現金股利不建立事件。
 
-每日完整同步 Cron 為 `35 5 * * *`，即台北時間 13:35；Cloudflare Cron 使用 UTC。另以 `0 * * * *` 更新所有 enabled 標的行情。
+Cloudflare 以 `* * * * *`（UTC）喚醒輕量 scheduler。owner 設定的每日台北時間保存在 D1，scheduler 只在該分鐘原子取得當日執行權後進行完整同步；同一天最多執行一次。所有 enabled 標的行情仍在每個整點更新，若每日同步恰逢整點則只更新一次行情。
 
 ## 來源優先級
 

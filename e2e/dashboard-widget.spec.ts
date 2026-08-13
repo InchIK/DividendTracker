@@ -26,7 +26,10 @@ const widget = {
   }],
   totalGrossAmount: '10000', display: { title: '7月預計配息', total: '$10,000', lines: ['2330 2026-07-10｜2,000股 ×5＝10,000｜昨1000 今1010'], compact: null },
   freshness: { stale: false, lastSuccessfulSync: '2026-08-11T05:35:00.000Z' }, generatedAt: '2026-08-11T05:35:00.000Z',
-  appearance: { theme: 'ocean', mode: 'gradient', startColor: '#071426', endColor: '#0F766E', updatedAt: null },
+  appearance: {
+    theme: 'ocean', mode: 'gradient', startColor: '#071426', endColor: '#0F766E',
+    sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 180, updatedAt: null,
+  },
 };
 
 let rotatePasswords: string[] = [];
@@ -48,14 +51,27 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/v1/auth/widget-token/reveal', (route) => route.fulfill({ json: { token: 'widget-read-only-test-token' } }));
   await page.route('**/api/v1/dashboard**', (route) => route.fulfill({ json: dashboard }));
   await page.route('**/api/v1/sources/status', (route) => route.fulfill({ json: { sources: [], anyStale: false } }));
+  await page.route('**/api/v1/watchlist', (route) => route.fulfill({ json: {
+    items: [{
+      instrumentId: 'twse:2330', market: 'twse', code: '2330', kind: 'stock',
+      displayName: 'Test Stock', shares: 100, enabled: true, status: 'validated', updatedAt: '2026-08-11T05:35:00.000Z',
+    }],
+  } }));
   await page.route('**/api/v1/widget/current**', (route) => route.fulfill({ json: widget }));
   await page.route('**/api/v1/widget/settings', async (route) => {
     if (route.request().method() === 'PUT') {
-      const body = route.request().postDataJSON() as { mode: 'solid' | 'gradient'; startColor: string; endColor: string };
+      const body = route.request().postDataJSON() as {
+        mode: 'solid' | 'gradient'; startColor: string; endColor: string;
+        sortMode: 'dividend_desc' | 'random' | 'price_desc' | 'featured';
+        featuredInstrumentId: string | null; refreshMinutes: number;
+      };
       await route.fulfill({ json: { theme: 'ocean', ...body, updatedAt: '2026-08-11T14:00:00.000Z' } });
       return;
     }
-    await route.fulfill({ json: { theme: 'ocean', mode: 'gradient', startColor: '#071426', endColor: '#0F766E', updatedAt: null } });
+    await route.fulfill({ json: {
+      theme: 'ocean', mode: 'gradient', startColor: '#071426', endColor: '#0F766E',
+      sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 180, updatedAt: null,
+    } });
   });
 });
 
@@ -132,7 +148,10 @@ test('Widget background accepts arbitrary solid or gradient colors', async ({ pa
   const updateRequest = page.waitForRequest((request) => request.url().endsWith('/api/v1/widget/settings') && request.method() === 'PUT');
   await page.getByRole('button', { name: '儲存外觀設定' }).click();
   const request = await updateRequest;
-  expect(request.postDataJSON()).toEqual({ mode: 'gradient', startColor: '#123ABC', endColor: '#FEDCBA' });
+  expect(request.postDataJSON()).toEqual({
+    mode: 'gradient', startColor: '#123ABC', endColor: '#FEDCBA',
+    sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 180,
+  });
   await expect(page.getByRole('status')).toContainText('外觀設定已儲存');
   await expect(page.getByLabel('外觀預覽')).toHaveAttribute('style', /rgb\(18, 58, 188\).*rgb\(254, 220, 186\)/);
   await page.getByRole('button', { name: '單色' }).click();
@@ -140,5 +159,33 @@ test('Widget background accepts arbitrary solid or gradient colors', async ({ pa
   await expect(endColor).toBeHidden();
   const solidRequest = page.waitForRequest((candidate) => candidate.url().endsWith('/api/v1/widget/settings') && candidate.method() === 'PUT');
   await page.getByRole('button', { name: '儲存外觀設定' }).click();
-  expect((await solidRequest).postDataJSON()).toEqual({ mode: 'solid', startColor: '#F1F5F9', endColor: '#F1F5F9' });
+  expect((await solidRequest).postDataJSON()).toEqual({
+    mode: 'solid', startColor: '#F1F5F9', endColor: '#F1F5F9',
+    sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 180,
+  });
+});
+
+test('Widget ordering and refresh controls submit the complete preference body', async ({ page }) => {
+  await page.goto('/#/widget-setup');
+  const sortSelect = page.getByLabel('Widget 排列方式');
+  await expect(sortSelect.locator('option')).toHaveCount(4);
+  await sortSelect.selectOption('featured');
+  const featuredSelect = page.getByLabel('自訂第一個顯示的標的');
+  await expect(featuredSelect).toBeVisible();
+  await featuredSelect.selectOption('twse:2330');
+  await page.getByLabel('Widget 更新間隔（分鐘）').fill('45');
+
+  const updateRequest = page.waitForRequest((request) => (
+    request.url().endsWith('/api/v1/widget/settings') && request.method() === 'PUT'
+  ));
+  await page.getByRole('button', { name: '儲存排列與更新' }).click();
+  expect((await updateRequest).postDataJSON()).toEqual({
+    mode: 'gradient',
+    startColor: '#071426',
+    endColor: '#0F766E',
+    sortMode: 'featured',
+    featuredInstrumentId: 'twse:2330',
+    refreshMinutes: 45,
+  });
+  await expect(page.getByRole('status')).toContainText('排列與更新設定已套用');
 });

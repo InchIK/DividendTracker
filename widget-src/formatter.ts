@@ -60,12 +60,34 @@ export interface WidgetResponse {
 
 export type WidgetTheme = 'ocean' | 'midnight' | 'sunset' | 'forest';
 export type WidgetBackgroundMode = 'solid' | 'gradient';
+export type WidgetSortMode = 'dividend_desc' | 'random' | 'price_desc' | 'featured';
+
+export const DEFAULT_WIDGET_SORT_MODE: WidgetSortMode = 'dividend_desc';
+export const DEFAULT_WIDGET_REFRESH_MINUTES = 180;
+export const MIN_WIDGET_REFRESH_MINUTES = 15;
+export const MAX_WIDGET_REFRESH_MINUTES = 1440;
+
+export function normalizeWidgetRefreshMinutes(value: unknown): number {
+  return typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= MIN_WIDGET_REFRESH_MINUTES
+    && value <= MAX_WIDGET_REFRESH_MINUTES
+    ? value
+    : DEFAULT_WIDGET_REFRESH_MINUTES;
+}
+
+export function nextRefreshDate(now: Date, refreshMinutes: unknown): Date {
+  return new Date(now.getTime() + normalizeWidgetRefreshMinutes(refreshMinutes) * 60_000);
+}
 
 export interface WidgetAppearance {
   theme: WidgetTheme;
   mode?: WidgetBackgroundMode;
   startColor?: string;
   endColor?: string;
+  sortMode?: WidgetSortMode;
+  featuredInstrumentId?: string | null;
+  refreshMinutes?: number;
   updatedAt: string | null;
 }
 

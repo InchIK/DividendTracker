@@ -5,17 +5,44 @@
  * GET  /api/v1/sources/status — admin auth, source freshness
  */
 import { Hono } from 'hono';
-import { requireAdmin, type AuthEnv } from '../auth/bearer';
+import { z } from 'zod';
+import { authUserId, requireAdmin, requireOwner, type AuthEnv } from '../auth/bearer';
 import { getSyncRuns } from '../db/queries';
 import { runSync } from '../sync/run-sync';
 import { runPriceSync } from '../sync/run-price-sync';
 import { checkSourceHealth } from '../sync/source-health';
+import {
+  getSyncSchedule,
+  isValidDailyTime,
+  saveSyncSchedule,
+} from '../sync/schedule-settings';
 import type { TriggerKind } from '../db/types';
 
 export const syncRoutes = new Hono<AuthEnv>();
 
 syncRoutes.use('/api/v1/sync/*', requireAdmin());
 syncRoutes.use('/api/v1/sources/*', requireAdmin());
+
+const syncScheduleUpdateSchema = z.object({ dailyTime: z.string() }).strict();
+
+// GET /api/v1/sync/settings
+syncRoutes.get('/api/v1/sync/settings', async (c) => {
+  return c.json(await getSyncSchedule(c.env.DB));
+});
+
+// PUT /api/v1/sync/settings (owner only)
+syncRoutes.put('/api/v1/sync/settings', requireOwner(), async (c) => {
+  const parsed = syncScheduleUpdateSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success || !isValidDailyTime(parsed.data.dailyTime)) {
+    return c.json({ error: 'dailyTime must be HH:mm between 00:00 and 23:59' }, 400);
+  }
+
+  return c.json(await saveSyncSchedule(
+    c.env.DB,
+    parsed.data.dailyTime,
+    authUserId(c),
+  ));
+});
 
 // POST /api/v1/sync
 syncRoutes.post('/api/v1/sync', async (c) => {

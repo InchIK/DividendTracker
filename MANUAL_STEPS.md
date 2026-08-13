@@ -35,7 +35,9 @@ npm run check:privacy:current
 
 在 Dashboard 的 Widget 頁面輸入目前帳號密碼並下載。每次下載都會驗證密碼、輪替全新 Token、產生新的 installation ID，並綁定目前頁面 Origin；連線測試成功後才產生腳本。舊 Widget 會立即失效，頁面不會顯示或複製 Token。
 
-將下載的 `DividendTrackerWidget.js` 分享至 Scriptable，再加入主畫面或鎖定畫面。要更換設定時，請回 Dashboard 重新下載，不要在 Scriptable 內貼上舊 Token。
+將下載的 `DividendTrackerWidget.js` 分享至 Scriptable，再加入主畫面或鎖定畫面。背景、排列方式與更新間隔可直接在 Dashboard 儲存，既有 Widget 會在下次更新時套用；若要更換連線憑證，才需要重新下載，不要在 Scriptable 內貼上舊 Token。
+
+每日完整同步時間由 owner 在「資料同步」頁以台北時間設定，不需重新部署。Widget 更新間隔是 Scriptable 提交給 iOS 的最早更新時間，實際喚醒時間仍由系統決定。
 
 ## 5. 隱私重置
 

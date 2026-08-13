@@ -89,6 +89,10 @@ widgetRoutes.get('/api/v1/widget/current', async (c) => {
     stale,
     lastSync,
     priceEntries,
+    {
+      sortMode: appearance.sortMode,
+      featuredInstrumentId: appearance.featuredInstrumentId,
+    },
   );
 
   return c.json({ ...response, appearance });

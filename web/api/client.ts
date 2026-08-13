@@ -356,12 +356,16 @@ export interface WidgetResponseDTO {
 
 export type WidgetTheme = "ocean" | "midnight" | "sunset" | "forest";
 export type WidgetBackgroundMode = "solid" | "gradient";
+export type WidgetSortMode = "dividend_desc" | "random" | "price_desc" | "featured";
 
 export interface WidgetAppearanceDTO {
   theme: WidgetTheme;
   mode: WidgetBackgroundMode;
   startColor: string;
   endColor: string;
+  sortMode: WidgetSortMode;
+  featuredInstrumentId: string | null;
+  refreshMinutes: number;
   updatedAt: string | null;
 }
 
@@ -369,6 +373,9 @@ export interface WidgetAppearanceUpdateDTO {
   mode: WidgetBackgroundMode;
   startColor: string;
   endColor: string;
+  sortMode: WidgetSortMode;
+  featuredInstrumentId: string | null;
+  refreshMinutes: number;
 }
 
 export interface DividendsResponse {
@@ -417,6 +424,12 @@ export interface SourceStatusDTO {
 export interface SourcesStatusResponse {
   sources: SourceStatusDTO[];
   lastSuccessfulSync: string | null;
+}
+
+export interface SyncScheduleDTO {
+  dailyTime: string;
+  timezone: "Asia/Taipei";
+  updatedAt: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -610,5 +623,16 @@ export const api = {
 
   getSourcesStatus(): Promise<SourcesStatusResponse> {
     return request<SourcesStatusResponse>("/sources/status");
+  },
+
+  getSyncSettings(): Promise<SyncScheduleDTO> {
+    return request<SyncScheduleDTO>("/sync/settings");
+  },
+
+  updateSyncSettings(dailyTime: string): Promise<SyncScheduleDTO> {
+    return request<SyncScheduleDTO>("/sync/settings", {
+      method: "PUT",
+      body: { dailyTime },
+    });
   },
 };

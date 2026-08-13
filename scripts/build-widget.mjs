@@ -48,6 +48,7 @@ try {
     String.raw`\u6628\u6536`,
     String.raw`\u4ECA\u6536`,
     'compactYuanAmount', 'startColor', 'endColor',
+    'refreshMinutes', 'nextRefreshDate',
     '#071426', '#BE123C', '#166534',
   ]) {
     if (!genericBundle.includes(marker)) {

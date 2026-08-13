@@ -2,6 +2,7 @@ import { getCurrentPeriodInTaipei } from './date';
 import {
   buildWidgetResponse,
   type PortfolioEntry,
+  type WidgetBuildOptions,
   type WidgetPriceEntry,
   type WidgetResponse,
 } from './widget-response';
@@ -24,6 +25,7 @@ export function buildUpcomingWidgetResponse(
   freshnessStale = false,
   lastSuccessfulSync: string | null = null,
   prices: WidgetPriceEntry[] = [],
+  options: WidgetBuildOptions = {},
 ): UpcomingWidgetResponse {
   const followingPeriod = nextMonth(currentPeriod);
   const current = buildWidgetResponse(
@@ -34,6 +36,7 @@ export function buildUpcomingWidgetResponse(
     freshnessStale,
     lastSuccessfulSync,
     prices,
+    options,
   );
   const following = buildWidgetResponse(
     events,
@@ -43,6 +46,7 @@ export function buildUpcomingWidgetResponse(
     freshnessStale,
     lastSuccessfulSync,
     prices,
+    options,
   );
 
   return {

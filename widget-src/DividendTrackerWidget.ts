@@ -24,6 +24,7 @@ import {
   statusBanner,
   buildUpcomingSummaries,
   markUpcomingPayloadStale,
+  nextRefreshDate,
   type WidgetAppearance,
   type WidgetTheme,
 } from './formatter';
@@ -38,9 +39,6 @@ import { fetchWidgetPayload, WidgetApiError } from './api';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Refresh policy: iOS WidgetKit will invoke us again after this many hours. */
-const REFRESH_HOURS = 3;
 
 /** URL path to the web dashboard (so tapping the widget opens the dashboard). */
 const DASHBOARD_PATH = '/';
@@ -88,7 +86,6 @@ export async function run(): Promise<void> {
   // Normal widget update path.
   const family = currentFamily();
   const widget = await buildWidget(family, config);
-  widget.refreshAfterDate = new Date(Date.now() + REFRESH_HOURS * 3600 * 1000);
   Script.setWidget(widget);
   Script.complete();
 }
@@ -101,6 +98,7 @@ async function buildWidget(family: WidgetFamily, config: WidgetConfig): Promise<
 
   const widget = new ListWidget();
   widget.url = dashboardUrl(config.baseUrl);
+  widget.refreshAfterDate = nextRefreshDate(new Date(), data.appearance?.refreshMinutes);
 
   switch (family) {
     case 'accessoryRectangular':

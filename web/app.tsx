@@ -100,7 +100,7 @@ export default function App() {
       page = <DividendsPage />;
       break;
     case 'sync':
-      page = <SyncPage />;
+      page = <SyncPage canManageSchedule={user.role === 'owner'} />;
       break;
     case 'widget':
       page = <WidgetSetupPage />;

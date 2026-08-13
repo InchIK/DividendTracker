@@ -2,7 +2,7 @@
 
 ## 範圍
 
-DividendTracker 使用帳號與密碼驗證。公開市場目錄、股利事件、價格快照與來源狀態可共用；帳號、持股、股利覆寫、Widget 外觀與 Widget 憑證都以 `user_id` 隔離。
+DividendTracker 使用帳號與密碼驗證。公開市場目錄、股利事件、價格快照與來源狀態可共用；帳號、持股、股利覆寫、Widget 外觀／排列／更新間隔與 Widget 憑證都以 `user_id` 隔離。
 
 ## 驗證與註冊
 
@@ -17,16 +17,18 @@ DividendTracker 使用帳號與密碼驗證。公開市場目錄、股利事件�
 | --- | --- |
 | users、credentials、sessions | 使用者 |
 | watchlist、持股與啟用狀態 | 使用者 |
-| Widget 外觀與 Widget 憑證 | 使用者 |
+| Widget 外觀、排列、更新間隔與 Widget 憑證 | 使用者 |
 | 手動股利覆寫與鎖定 | 使用者 |
 | instruments、股利事件與公開價格 | 共用市場資料 |
-| source status 與 sync runs | 共用作業狀態 |
+| source status、sync runs 與每日同步時間 | 共用作業狀態（同步時間僅 owner 可改） |
 
 每個需要私有資料的 API 都必須使用 middleware 解析出的 `authUserId`，並在查詢與寫入時加入明確的使用者條件。Widget bearer credential 也只解析到同一個 `user_id`。
 
 ## Widget 憑證與安裝
 
 每位使用者可取得獨立的 Widget Token。Dashboard 每次下載都輪替 Token、建立新的 installation ID，並嵌入目前頁面 Origin；測試新 Token 成功後才產生腳本。舊腳本會立即失效，generic 或舊 Keychain/cache 不會被接管。
+
+Widget 顯示設定保存在 D1 並由 Widget API 隨資料回傳，不嵌入 generic bundle，也不需要因調整背景、排列或更新間隔而重新下載腳本。
 
 ## 設定與資源
 

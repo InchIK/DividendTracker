@@ -5,6 +5,7 @@ import customAppearanceMigration from '../../migrations/0004_widget_custom_backg
 import multiUserMigration from '../../migrations/0005_multi_user_auth.sql?raw';
 import registrationPolicyMigration from '../../migrations/0006_registration_policy.sql?raw';
 import cleanInstallMigration from '../../migrations/0007_clean_install_privacy_reset.sql?raw';
+import widgetPreferencesMigration from '../../migrations/0008_widget_preferences.sql?raw';
 import { sha256Base64Url } from '../../worker/auth/encoding';
 
 export const TEST_SESSION_TOKEN = 'test-browser-session-token';
@@ -32,6 +33,7 @@ export async function applyMultiUserMigrations(db: D1Database): Promise<void> {
     multiUserMigration,
     registrationPolicyMigration,
     cleanInstallMigration,
+    widgetPreferencesMigration,
   ]) {
     await applyMigration(db, migration);
   }

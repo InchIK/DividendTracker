@@ -327,7 +327,7 @@ export function PortfolioPage(): React.JSX.Element {
           </label>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />啟用每日台北時間 13:35 同步（新增時立即回補一年）</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />啟用自動同步（新增時立即回補一年）</label>
           <button type="submit" disabled={submitting} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">{submitting ? "正在回補一年資料與行情…" : "新增並立即回補"}</button>
         </div>
         {submitting && <p role="status" className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">正在從資料來源回補此標的至少一年股利，並更新昨收與今日成交；完成前請勿關閉頁面。</p>}

@@ -11,6 +11,8 @@ import {
   compactYuanAmount,
   fullAmount,
   markUpcomingPayloadStale,
+  nextRefreshDate,
+  normalizeWidgetRefreshMinutes,
   type UpcomingWidgetResponse,
   type WidgetResponse,
 } from '../../widget-src/formatter';
@@ -60,9 +62,20 @@ describe('upcoming widget API model', () => {
 
     value.appearance = {
       theme: 'ocean', mode: 'gradient', startColor: '#123ABC', endColor: '#FEDCBA',
+      sortMode: 'price_desc', featuredInstrumentId: null, refreshMinutes: 45,
       updatedAt: '2026-08-11T01:00:00.000Z',
     };
     expect(parseUpcomingWidgetPayload(value)).toEqual(value);
+  });
+
+  it('fills missing appearance preferences with safe defaults for old payloads', () => {
+    const parsed = parseUpcomingWidgetPayload({
+      ...payload(),
+      appearance: { theme: 'ocean', mode: 'gradient', startColor: '#123ABC', endColor: '#FEDCBA', updatedAt: null },
+    });
+    expect(parsed.appearance).toMatchObject({
+      sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 180,
+    });
   });
 
   it('rejects missing, non-consecutive, and malformed periods', () => {
@@ -81,6 +94,37 @@ describe('upcoming widget API model', () => {
         updatedAt: null,
       },
     })).toThrow('appearance');
+    expect(() => parseUpcomingWidgetPayload({
+      ...payload(),
+      appearance: { theme: 'ocean', updatedAt: null, sortMode: 'invalid', refreshMinutes: 180, featuredInstrumentId: null },
+    })).toThrow('appearance');
+    expect(() => parseUpcomingWidgetPayload({
+      ...payload(),
+      appearance: { theme: 'ocean', updatedAt: null, sortMode: 'dividend_desc', refreshMinutes: 14, featuredInstrumentId: null },
+    })).toThrow('appearance');
+    expect(() => parseUpcomingWidgetPayload({
+      ...payload(),
+      appearance: { theme: 'ocean', updatedAt: null, sortMode: 'featured', refreshMinutes: 180, featuredInstrumentId: null },
+    })).toThrow('appearance');
+  });
+});
+
+describe('widget refresh policy helpers', () => {
+  const now = new Date('2026-08-13T00:00:00.000Z');
+
+  it('accepts the 15-minute, default, and 1440-minute bounds and falls back safely', () => {
+    expect(normalizeWidgetRefreshMinutes(15)).toBe(15);
+    expect(normalizeWidgetRefreshMinutes(180)).toBe(180);
+    expect(normalizeWidgetRefreshMinutes(1440)).toBe(1440);
+    expect(normalizeWidgetRefreshMinutes(14)).toBe(180);
+    expect(normalizeWidgetRefreshMinutes(1441)).toBe(180);
+    expect(normalizeWidgetRefreshMinutes(15.5)).toBe(180);
+  });
+
+  it('computes the next refresh date from normalized minutes', () => {
+    expect(nextRefreshDate(now, 15).toISOString()).toBe('2026-08-13T00:15:00.000Z');
+    expect(nextRefreshDate(now, 1440).toISOString()).toBe('2026-08-14T00:00:00.000Z');
+    expect(nextRefreshDate(now, 14).toISOString()).toBe('2026-08-13T03:00:00.000Z');
   });
 });
 

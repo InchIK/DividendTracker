@@ -52,10 +52,9 @@
         "crons": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["hourlyPrices", "dailyDividendsTaipei1335Utc"],
+          "required": ["scheduler"],
           "properties": {
-            "hourlyPrices": { "type": "string" },
-            "dailyDividendsTaipei1335Utc": { "const": "35 5 * * *" }
+            "scheduler": { "const": "* * * * *" }
           }
         }
       }

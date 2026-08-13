@@ -185,7 +185,10 @@ describe('account and per-user authentication', () => {
 
     const memberAppearance = await request('/api/v1/widget/settings', {
       method: 'PUT', cookie: memberCookie,
-      body: { mode: 'solid', startColor: '#123ABC', endColor: '#123ABC' },
+      body: {
+        mode: 'solid', startColor: '#123ABC', endColor: '#123ABC',
+        sortMode: 'dividend_desc', featuredInstrumentId: null, refreshMinutes: 180,
+      },
     });
     expect(memberAppearance.status).toBe(200);
     expect(await memberAppearance.json()).toMatchObject({ mode: 'solid', startColor: '#123ABC' });

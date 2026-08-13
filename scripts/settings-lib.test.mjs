@@ -28,7 +28,7 @@ void test('validates the documented example and emits a secret-free Wrangler con
   const config = JSON.parse(output);
 
   assert.equal(config.name, 'dividend-tracker');
-  assert.deepEqual(config.triggers.crons, ['0 * * * *', '35 5 * * *']);
+  assert.deepEqual(config.triggers.crons, ['* * * * *']);
   assert.deepEqual(config.secrets.required, ['TOKEN_ENCRYPTION_KEY']);
   assert.equal(config.d1_databases[0].database_id, undefined);
   assert.equal(output.includes(settings.secrets.tokenEncryptionKey), false);
@@ -43,6 +43,24 @@ void test('includes an explicit D1 id only in the local generated config', async
 
 void test('rejects an incorrect Taipei daily refresh schedule', async () => {
   const settings = await exampleSettings();
+  settings.cloudflare.crons.scheduler = '35 13 * * *';
+  assert.throws(() => validateSettings(settings), /scheduler.*\* \* \* \* \*/);
+});
+
+void test('accepts the legacy two-cron shape but emits only the minute scheduler', async () => {
+  const settings = await exampleSettings();
+  delete settings.cloudflare.crons.scheduler;
+  settings.cloudflare.crons.hourlyPrices = '0 * * * *';
+  settings.cloudflare.crons.dailyDividendsTaipei1335Utc = '35 5 * * *';
+  validateSettings(settings);
+  const config = JSON.parse(generatedWrangler(settings));
+  assert.deepEqual(config.triggers.crons, ['* * * * *']);
+});
+
+void test('rejects incomplete legacy cron settings', async () => {
+  const settings = await exampleSettings();
+  delete settings.cloudflare.crons.scheduler;
+  settings.cloudflare.crons.hourlyPrices = '0 * * * *';
   settings.cloudflare.crons.dailyDividendsTaipei1335Utc = '35 13 * * *';
   assert.throws(() => validateSettings(settings), /35 5 \* \* \*/);
 });
