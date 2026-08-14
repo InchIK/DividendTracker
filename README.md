@@ -35,7 +35,7 @@ DividendTracker 是以 Cloudflare Workers、D1 與 Scriptable Widget 建立的�
 ## 快速開始
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
+git clone https://github.com/InchIK/DividendTracker.git
 cd REPOSITORY
 npm install
 npm run setup
