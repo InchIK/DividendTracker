@@ -116,7 +116,9 @@ npm run setup:cloudflare
 
 FinMind 官方目前的配額為：已驗證 FinMind 帳號並搭配 API Token，每小時 600 次；匿名呼叫每小時 300 次。詳見[登入與 Token 說明](https://finmind.github.io/login/)及[API 使用次數](https://finmind.github.io/api_usage_count/)。
 
-正式環境如需提高配額，請在專案目錄執行互動式命令：
+正式環境如需提高配額，建議登入後由擁有者在「資料同步」頁設定 FinMind API Token。Token 會在 D1 以 `TOKEN_ENCRYPTION_KEY` 加密儲存，API 永不回傳 Token 內容；後續同步會優先使用此設定。
+
+若尚未使用 UI，也可以在專案目錄執行互動式 Wrangler 命令，作為替代或備援：
 
 ```bash
 npx wrangler secret put FINMIND_API_TOKEN --config wrangler.generated.jsonc

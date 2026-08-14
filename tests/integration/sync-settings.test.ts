@@ -8,6 +8,10 @@ import {
   completeDailySyncDate,
 } from '../../worker/sync/schedule-settings';
 import {
+  FINMIND_API_TOKEN_SETTING_KEY,
+  resolveFinmindApiToken,
+} from '../../worker/sync/finmind-token-settings';
+import {
   applyMultiUserMigrations,
   seedAuthenticatedUser,
   testEnv,
@@ -17,6 +21,8 @@ import {
 const OWNER_SESSION = 'test-browser-session-token';
 const MEMBER_ID = 'usr_test_member';
 const MEMBER_SESSION = 'test-member-session-token';
+const FAKE_FINMIND_TOKEN = 'fake-finmind-token-0123456789';
+const FALLBACK_FINMIND_TOKEN = 'fallback-finmind-token-9876543210';
 
 async function request(
   path: string,
@@ -156,5 +162,130 @@ describe('daily sync schedule settings', () => {
        VALUES ('last_daily_sync_date_taipei', '2026-08-13', NULL, '2026-08-13T05:35:00.000Z')`,
     ).run();
     await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T06:00:00.000Z')).resolves.toBe(true);
+  });
+});
+
+describe('FinMind token settings', () => {
+  it('returns owner none status without a token field', async () => {
+    const response = await request('/api/v1/sync/finmind-token');
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toEqual({
+      configured: false,
+      source: 'none',
+      updatedAt: null,
+      storedTokenInvalid: false,
+    });
+    expect(body).not.toHaveProperty('token');
+  });
+
+  it('stores an encrypted owner token and resolves it without returning plaintext', async () => {
+    const response = await request('/api/v1/sync/finmind-token', {
+      method: 'PUT',
+      body: { token: FAKE_FINMIND_TOKEN },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({ configured: true, source: 'database', storedTokenInvalid: false });
+    expect(body).not.toHaveProperty('token');
+    expect(JSON.stringify(body)).not.toContain(FAKE_FINMIND_TOKEN);
+
+    const row = await env.DB.prepare(
+      `SELECT setting_value FROM application_settings WHERE setting_key = ?`,
+    ).bind(FINMIND_API_TOKEN_SETTING_KEY).first<{ setting_value: string }>();
+    expect(row?.setting_value).toBeTruthy();
+    expect(row?.setting_value).not.toContain(FAKE_FINMIND_TOKEN);
+    await expect(resolveFinmindApiToken(
+      env.DB,
+      testEnv(env.DB).TOKEN_ENCRYPTION_KEY,
+      null,
+    )).resolves.toMatchObject({
+      token: FAKE_FINMIND_TOKEN,
+      source: 'database',
+      configured: true,
+      storedTokenInvalid: false,
+    });
+  });
+
+  it('rejects malformed token payloads without storing a row', async () => {
+    for (const body of [
+      { token: 'too-short' },
+      { token: '   ' },
+      { token: FAKE_FINMIND_TOKEN, extra: 'field' },
+    ]) {
+      const response = await request('/api/v1/sync/finmind-token', {
+        method: 'PUT',
+        body,
+      });
+      expect(response.status).toBe(400);
+      expect(await response.text()).not.toContain(FAKE_FINMIND_TOKEN);
+    }
+    await expect(env.DB.prepare(
+      `SELECT setting_value FROM application_settings WHERE setting_key = ?`,
+    ).bind(FINMIND_API_TOKEN_SETTING_KEY).first()).resolves.toBeNull();
+  });
+
+  it('denies members all FinMind token operations', async () => {
+    await expect(request('/api/v1/sync/finmind-token', { session: MEMBER_SESSION })).resolves.toHaveProperty('status', 403);
+    await expect(request('/api/v1/sync/finmind-token', {
+      method: 'PUT',
+      session: MEMBER_SESSION,
+      body: { token: FAKE_FINMIND_TOKEN },
+    })).resolves.toHaveProperty('status', 403);
+    await expect(request('/api/v1/sync/finmind-token', {
+      method: 'DELETE',
+      session: MEMBER_SESSION,
+    })).resolves.toHaveProperty('status', 403);
+  });
+
+  it('deletes the D1 setting and falls back to an environment token', async () => {
+    const saved = await request('/api/v1/sync/finmind-token', {
+      method: 'PUT',
+      body: { token: FAKE_FINMIND_TOKEN },
+    });
+    expect(saved.status).toBe(200);
+    const deleted = await request('/api/v1/sync/finmind-token', { method: 'DELETE' });
+    expect(deleted.status).toBe(200);
+    await expect(deleted.json()).resolves.toMatchObject({
+      configured: false,
+      source: 'none',
+      storedTokenInvalid: false,
+    });
+    await expect(env.DB.prepare(
+      `SELECT setting_value FROM application_settings WHERE setting_key = ?`,
+    ).bind(FINMIND_API_TOKEN_SETTING_KEY).first()).resolves.toBeNull();
+    await expect(resolveFinmindApiToken(
+      env.DB,
+      testEnv(env.DB).TOKEN_ENCRYPTION_KEY,
+      FALLBACK_FINMIND_TOKEN,
+    )).resolves.toMatchObject({
+      token: FALLBACK_FINMIND_TOKEN,
+      source: 'environment',
+      configured: true,
+      storedTokenInvalid: false,
+    });
+  });
+
+  it('falls back safely when the stored encrypted JSON is corrupted', async () => {
+    await env.DB.prepare(
+      `INSERT INTO application_settings (setting_key, setting_value, updated_by_user_id, updated_at)
+       VALUES (?, ?, ?, ?)`,
+    ).bind(
+      FINMIND_API_TOKEN_SETTING_KEY,
+      '{"version":1,"ciphertext":"corrupt"',
+      TEST_USER_ID,
+      '2026-08-13T00:00:00.000Z',
+    ).run();
+    await expect(resolveFinmindApiToken(
+      env.DB,
+      testEnv(env.DB).TOKEN_ENCRYPTION_KEY,
+      FALLBACK_FINMIND_TOKEN,
+    )).resolves.toMatchObject({
+      token: FALLBACK_FINMIND_TOKEN,
+      source: 'environment',
+      configured: true,
+      updatedAt: '2026-08-13T00:00:00.000Z',
+      storedTokenInvalid: true,
+    });
   });
 });

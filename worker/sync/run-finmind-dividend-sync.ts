@@ -4,6 +4,10 @@ import { toIsoDateInTaipei } from '../domain/date';
 import { hashPayload } from '../domain/reconciliation';
 import { fetchFinmindDividendHistory } from '../sources/finmind-dividends';
 import { applyObservationGroups } from './apply-observations';
+import {
+  readOptionalFinmindEnvToken,
+  resolveFinmindApiToken,
+} from './finmind-token-settings';
 
 export interface FinmindDividendSyncResult {
   outcome: 'empty_selection' | 'success' | 'partial' | 'rejected';
@@ -20,8 +24,6 @@ export interface FinmindDividendSyncOptions {
   fetchImpl?: typeof fetch;
 }
 
-type FinmindTokenEnv = Env & { FINMIND_API_TOKEN?: string };
-
 function offsetDate(date: Date, days: number): string {
   const copy = new Date(date.getTime());
   copy.setUTCDate(copy.getUTCDate() + days);
@@ -36,7 +38,19 @@ export async function runFinmindDividendSync(
   const observedAt = now.toISOString();
   const startDate = offsetDate(now, -370);
   const endDate = offsetDate(now, 370);
-  const finmindApiToken = (env as FinmindTokenEnv).FINMIND_API_TOKEN;
+  const tokenResolution = await resolveFinmindApiToken(
+    env.DB,
+    env.TOKEN_ENCRYPTION_KEY,
+    readOptionalFinmindEnvToken(env),
+  );
+  if (tokenResolution.storedTokenInvalid) {
+    console.error(JSON.stringify({
+      message: 'FinMind API token setting invalid; using fallback',
+      event: 'finmind_token_invalid',
+      source: tokenResolution.source,
+    }));
+  }
+
   const selected = await env.DB.prepare(
     `SELECT DISTINCT i.instrument_id, i.code, i.market, i.kind
      FROM watchlist AS w
@@ -61,7 +75,7 @@ export async function runFinmindDividendSync(
       endDate,
       observedAt,
       options.fetchImpl,
-      finmindApiToken,
+      tokenResolution.token ?? undefined,
     ));
   }
   const errors = results.flatMap((result) =>

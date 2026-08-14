@@ -16,6 +16,13 @@ import {
   isValidDailyTime,
   saveSyncSchedule,
 } from '../sync/schedule-settings';
+import {
+  deleteFinmindApiToken,
+  normalizeFinmindApiToken,
+  readOptionalFinmindEnvToken,
+  resolveFinmindApiToken,
+  saveFinmindApiToken,
+} from '../sync/finmind-token-settings';
 import type { TriggerKind } from '../db/types';
 
 export const syncRoutes = new Hono<AuthEnv>();
@@ -42,6 +49,54 @@ syncRoutes.put('/api/v1/sync/settings', requireOwner(), async (c) => {
     parsed.data.dailyTime,
     authUserId(c),
   ));
+});
+
+const finmindTokenUpdateSchema = z.object({ token: z.string() }).strict();
+
+function publicFinmindTokenStatus(resolution: Awaited<ReturnType<typeof resolveFinmindApiToken>>) {
+  return {
+    configured: resolution.configured,
+    source: resolution.source,
+    updatedAt: resolution.updatedAt,
+    storedTokenInvalid: resolution.storedTokenInvalid,
+  };
+}
+
+// GET /api/v1/sync/finmind-token (owner only)
+syncRoutes.get('/api/v1/sync/finmind-token', requireOwner(), async (c) => {
+  const resolution = await resolveFinmindApiToken(
+    c.env.DB,
+    c.env.TOKEN_ENCRYPTION_KEY,
+    readOptionalFinmindEnvToken(c.env),
+  );
+  return c.json(publicFinmindTokenStatus(resolution));
+});
+
+// PUT /api/v1/sync/finmind-token (owner only)
+syncRoutes.put('/api/v1/sync/finmind-token', requireOwner(), async (c) => {
+  const parsed = finmindTokenUpdateSchema.safeParse(await c.req.json().catch(() => null));
+  const token = parsed.success ? normalizeFinmindApiToken(parsed.data.token) : null;
+  if (token === null) {
+    return c.json({ error: 'FinMind API Token 格式無效' }, 400);
+  }
+
+  return c.json(await saveFinmindApiToken(
+    c.env.DB,
+    c.env.TOKEN_ENCRYPTION_KEY,
+    token,
+    authUserId(c),
+  ));
+});
+
+// DELETE /api/v1/sync/finmind-token (owner only)
+syncRoutes.delete('/api/v1/sync/finmind-token', requireOwner(), async (c) => {
+  await deleteFinmindApiToken(c.env.DB);
+  const resolution = await resolveFinmindApiToken(
+    c.env.DB,
+    c.env.TOKEN_ENCRYPTION_KEY,
+    readOptionalFinmindEnvToken(c.env),
+  );
+  return c.json(publicFinmindTokenStatus(resolution));
 });
 
 // POST /api/v1/sync

@@ -432,6 +432,13 @@ export interface SyncScheduleDTO {
   updatedAt: string | null;
 }
 
+export interface FinmindTokenStatusDTO {
+  configured: boolean;
+  source: "database" | "environment" | "none";
+  updatedAt: string | null;
+  storedTokenInvalid: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // API surface
 // ---------------------------------------------------------------------------
@@ -633,6 +640,23 @@ export const api = {
     return request<SyncScheduleDTO>("/sync/settings", {
       method: "PUT",
       body: { dailyTime },
+    });
+  },
+
+  getFinmindTokenStatus(): Promise<FinmindTokenStatusDTO> {
+    return request<FinmindTokenStatusDTO>("/sync/finmind-token");
+  },
+
+  updateFinmindToken(token: string): Promise<FinmindTokenStatusDTO> {
+    return request<FinmindTokenStatusDTO>("/sync/finmind-token", {
+      method: "PUT",
+      body: { token },
+    });
+  },
+
+  deleteFinmindToken(): Promise<FinmindTokenStatusDTO> {
+    return request<FinmindTokenStatusDTO>("/sync/finmind-token", {
+      method: "DELETE",
     });
   },
 };

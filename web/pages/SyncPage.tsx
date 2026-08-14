@@ -4,6 +4,7 @@ import {
   type SyncRunDTO,
   type SourcesStatusResponse,
   type SyncScheduleDTO,
+  type FinmindTokenStatusDTO,
 } from "@/api/client";
 import { formatDateTime } from "@/lib/format";
 import { FreshnessCard } from "@/components/FreshnessCard";
@@ -22,13 +23,24 @@ const STATUS_LABEL: Record<SyncRunDTO["status"], string> = {
   failed: "失敗",
 };
 
-export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }): React.JSX.Element {
+const FINMIND_TOKEN_STATUS_LABEL: Record<FinmindTokenStatusDTO["source"], string> = {
+  database: "已由此頁加密儲存",
+  environment: "已由 Cloudflare Secret 設定",
+  none: "未設定（使用匿名額度）",
+};
+
+export function SyncPage({ canManageSettings }: { canManageSettings: boolean }): React.JSX.Element {
   const [runs, setRuns] = useState<SyncRunDTO[]>([]);
   const [sources, setSources] = useState<SourcesStatusResponse | null>(null);
   const [schedule, setSchedule] = useState<SyncScheduleDTO | null>(null);
   const [scheduleInput, setScheduleInput] = useState("13:35");
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleMsg, setScheduleMsg] = useState<string | null>(null);
+  const [finmindTokenStatus, setFinmindTokenStatus] = useState<FinmindTokenStatusDTO | null>(null);
+  const [finmindTokenInput, setFinmindTokenInput] = useState("");
+  const [finmindTokenSaving, setFinmindTokenSaving] = useState(false);
+  const [finmindTokenError, setFinmindTokenError] = useState<string | null>(null);
+  const [finmindTokenMsg, setFinmindTokenMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -38,13 +50,23 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setFinmindTokenError(null);
     try {
-      const [r, s] = await Promise.all([
+      const tokenPromise = canManageSettings
+        ? api.getFinmindTokenStatus().catch((tokenError: unknown) => {
+          setFinmindTokenStatus(null);
+          setFinmindTokenError(tokenError instanceof Error ? tokenError.message : "載入 FinMind API Token 設定失敗");
+          return null;
+        })
+        : Promise.resolve(null);
+      const [r, s, tokenStatus] = await Promise.all([
         api.getSyncRuns(50).catch(() => ({ items: [] })),
         api.getSourcesStatus().catch(() => null),
+        tokenPromise,
       ]);
       setRuns(r.items ?? []);
       setSources(s);
+      setFinmindTokenStatus(canManageSettings ? tokenStatus : null);
       try {
         const configuredSchedule = await api.getSyncSettings();
         setSchedule(configuredSchedule);
@@ -58,9 +80,9 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canManageSettings]);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const triggerSync = async () => {
     if (syncing) return; // prevent double-click
@@ -79,7 +101,7 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
   };
 
   const saveSchedule = async () => {
-    if (!canManageSchedule || scheduleSaving) return;
+    if (!canManageSettings || scheduleSaving) return;
     setScheduleSaving(true);
     setScheduleMsg(null);
     setError(null);
@@ -92,6 +114,44 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
       setError(err instanceof Error ? err.message : "無法儲存自動同步時間。");
     } finally {
       setScheduleSaving(false);
+    }
+  };
+
+  const saveFinmindToken = async () => {
+    if (!canManageSettings || finmindTokenSaving || finmindTokenInput.trim().length === 0) return;
+    setFinmindTokenSaving(true);
+    setFinmindTokenError(null);
+    setFinmindTokenMsg(null);
+    try {
+      const updated = await api.updateFinmindToken(finmindTokenInput.trim());
+      setFinmindTokenStatus(updated);
+      setFinmindTokenInput("");
+      setFinmindTokenMsg("Token 已加密儲存，後續同步會使用此設定；如要驗證可按「立即同步」。");
+    } catch (err) {
+      setFinmindTokenError(err instanceof Error ? err.message : "無法儲存 FinMind API Token。");
+    } finally {
+      setFinmindTokenSaving(false);
+    }
+  };
+
+  const deleteFinmindToken = async () => {
+    if (!canManageSettings || finmindTokenSaving || finmindTokenStatus?.source !== "database") return;
+    if (!window.confirm("確定要移除此頁設定嗎？")) return;
+    setFinmindTokenSaving(true);
+    setFinmindTokenError(null);
+    setFinmindTokenMsg(null);
+    try {
+      const updated = await api.deleteFinmindToken();
+      setFinmindTokenStatus(updated);
+      setFinmindTokenMsg(
+        updated.source === "environment"
+          ? "已移除此頁設定，後續同步會使用 Cloudflare Secret。"
+          : "已移除此頁設定，後續同步會使用匿名額度。",
+      );
+    } catch (err) {
+      setFinmindTokenError(err instanceof Error ? err.message : "無法移除 FinMind API Token 設定。");
+    } finally {
+      setFinmindTokenSaving(false);
     }
   };
 
@@ -161,7 +221,7 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
                 type="time"
                 value={scheduleInput}
                 onChange={(event) => setScheduleInput(event.target.value)}
-                disabled={!canManageSchedule || scheduleSaving}
+                disabled={!canManageSettings || scheduleSaving}
                 aria-describedby="daily-sync-help"
                 className="mt-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
               />
@@ -169,7 +229,7 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
             <button
               type="button"
               onClick={() => { void saveSchedule(); }}
-              disabled={!canManageSchedule || scheduleSaving || schedule === null && scheduleInput.length === 0}
+              disabled={!canManageSettings || scheduleSaving || schedule === null && scheduleInput.length === 0}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {scheduleSaving ? "儲存中…" : "儲存"}
@@ -177,11 +237,95 @@ export function SyncPage({ canManageSchedule }: { canManageSchedule: boolean }):
           </div>
         </div>
         <p id="daily-sync-help" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-          {canManageSchedule ? "只有擁有者可修改此時間。" : "僅擁有者可修改自動同步時間。"}
+          {canManageSettings ? "只有擁有者可修改此時間。" : "僅擁有者可修改自動同步時間。"}
         </p>
         {scheduleMsg && (
           <p role="status" aria-live="polite" className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">
             {scheduleMsg}
+          </p>
+        )}
+      </section>
+
+      <section
+        aria-labelledby="finmind-token-title"
+        className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 p-4 shadow-sm"
+      >
+        <div>
+          <h2 id="finmind-token-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+            FinMind API Token
+          </h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            儲存後會以加密設定供後續同步使用；此頁不會顯示 Token 內容。
+          </p>
+        </div>
+
+        {canManageSettings ? (
+          <>
+            <div className="mt-4 flex flex-wrap items-end gap-2">
+              <div className="min-w-[16rem] flex-1">
+                <label htmlFor="finmind-api-token" className="block text-xs font-medium text-slate-600 dark:text-slate-300">
+                  貼上 FinMind API Token
+                </label>
+                <input
+                  id="finmind-api-token"
+                  type="password"
+                  value={finmindTokenInput}
+                  onChange={(event) => setFinmindTokenInput(event.target.value)}
+                  placeholder="請貼上 FinMind API Token"
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  maxLength={4096}
+                  disabled={finmindTokenSaving}
+                  aria-describedby="finmind-token-help"
+                  className="mt-1 w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => { void saveFinmindToken(); }}
+                disabled={finmindTokenSaving || finmindTokenInput.trim().length === 0}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {finmindTokenSaving ? "處理中…" : "儲存 Token"}
+              </button>
+            </div>
+            <p id="finmind-token-help" className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              僅擁有者可管理；輸入框不會預填既有設定。
+            </p>
+            {finmindTokenStatus && (
+              <p className="mt-3 text-sm text-slate-600 dark:text-slate-300" aria-live="polite">
+                狀態：{FINMIND_TOKEN_STATUS_LABEL[finmindTokenStatus.source]}
+              </p>
+            )}
+            {finmindTokenStatus?.storedTokenInvalid && (
+              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-900/20 dark:text-amber-200" role="alert">
+                此頁原有 Token 設定無法解密，請重新輸入；同步會使用 Cloudflare Secret（若有設定），否則使用匿名額度。
+              </p>
+            )}
+            {finmindTokenStatus?.source === "database" && (
+              <button
+                type="button"
+                onClick={() => { void deleteFinmindToken(); }}
+                disabled={finmindTokenSaving}
+                className="mt-3 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-900/20"
+              >
+                移除此頁設定
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
+            FinMind API Token 僅限擁有者管理。
+          </p>
+        )}
+        {finmindTokenError && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert" aria-live="polite">
+            ⚠️ {finmindTokenError}
+          </p>
+        )}
+        {finmindTokenMsg && (
+          <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300" role="status" aria-live="polite">
+            {finmindTokenMsg}
           </p>
         )}
       </section>
