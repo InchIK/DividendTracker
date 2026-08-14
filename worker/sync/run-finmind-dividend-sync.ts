@@ -20,6 +20,8 @@ export interface FinmindDividendSyncOptions {
   fetchImpl?: typeof fetch;
 }
 
+type FinmindTokenEnv = Env & { FINMIND_API_TOKEN?: string };
+
 function offsetDate(date: Date, days: number): string {
   const copy = new Date(date.getTime());
   copy.setUTCDate(copy.getUTCDate() + days);
@@ -34,6 +36,7 @@ export async function runFinmindDividendSync(
   const observedAt = now.toISOString();
   const startDate = offsetDate(now, -370);
   const endDate = offsetDate(now, 370);
+  const finmindApiToken = (env as FinmindTokenEnv).FINMIND_API_TOKEN;
   const selected = await env.DB.prepare(
     `SELECT DISTINCT i.instrument_id, i.code, i.market, i.kind
      FROM watchlist AS w
@@ -58,6 +61,7 @@ export async function runFinmindDividendSync(
       endDate,
       observedAt,
       options.fetchImpl,
+      finmindApiToken,
     ));
   }
   const errors = results.flatMap((result) =>

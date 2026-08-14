@@ -70,18 +70,21 @@ export async function fetchFinmindDividendHistory(
   endDate: string,
   observedAt: string,
   fetchImpl: typeof fetch = fetch,
+  apiToken?: string,
 ): Promise<FinmindInstrumentResult> {
   const url = new URL(FINMIND_DIVIDEND_URL);
   url.searchParams.set('dataset', 'TaiwanStockDividend');
   url.searchParams.set('data_id', instrument.code);
   url.searchParams.set('start_date', startDate);
   url.searchParams.set('end_date', endDate);
+  const trimmedToken = apiToken?.trim();
 
   try {
     const response = await fetchWithRetry(url.toString(), {
       accept: 'application/json',
       timeoutMs: 20_000,
       fetchImpl,
+      ...(trimmedToken ? { headers: { Authorization: `Bearer ${trimmedToken}` } } : {}),
     });
     if (!response.ok) throw new Error(`FinMind returned HTTP ${response.status}`);
     const payload = response.json<FinmindResponse>();

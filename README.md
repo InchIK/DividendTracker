@@ -112,6 +112,18 @@ npm run setup:cloudflare
 
 第一次註冊的帳號是全新空白 owner，不會接管其他部署或舊資料。
 
+### FinMind 配額（可選）
+
+FinMind 官方目前的配額為：已驗證 FinMind 帳號並搭配 API Token，每小時 600 次；匿名呼叫每小時 300 次。詳見[登入與 Token 說明](https://finmind.github.io/login/)及[API 使用次數](https://finmind.github.io/api_usage_count/)。
+
+正式環境如需提高配額，請在專案目錄執行互動式命令：
+
+```bash
+npx wrangler secret put FINMIND_API_TOKEN --config wrangler.generated.jsonc
+```
+
+請只在 Wrangler 的隱藏提示中貼上 Token，絕不要將 Token 寫入原始碼、設定檔、Wrangler 設定、命令列參數或 Git。未設定時 Worker 仍會以匿名方式運作。
+
 ## Widget
 
 在 Dashboard 的 Widget 頁面按下下載時：

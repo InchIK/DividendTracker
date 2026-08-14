@@ -52,6 +52,49 @@ describe('FinMind configured-symbol dividend history', () => {
     const requested = new URL(String(fetchImpl.mock.calls[0]?.[0]));
     expect(requested.searchParams.get('data_id')).toBe('2330');
     expect(requested.searchParams.get('start_date')).toBe('2025-08-06');
+    const requestInit = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(requestInit?.headers).get('Authorization')).toBeNull();
+  });
+
+  it('sends a trimmed Bearer token when supplied', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      status: 200,
+      msg: 'success',
+      data: [],
+    }), { status: 200 })) as typeof fetch;
+
+    await fetchFinmindDividendHistory(
+      instrument,
+      '2025-08-06',
+      '2027-08-16',
+      '2026-08-11T05:35:00.000Z',
+      fetchImpl,
+      '  test-finmind-token  ',
+    );
+
+    const requestInit = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(requestInit?.headers).get('Authorization'))
+      .toBe('Bearer test-finmind-token');
+  });
+
+  it('omits Authorization for a whitespace-only token', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      status: 200,
+      msg: 'success',
+      data: [],
+    }), { status: 200 })) as typeof fetch;
+
+    await fetchFinmindDividendHistory(
+      instrument,
+      '2025-08-06',
+      '2027-08-16',
+      '2026-08-11T05:35:00.000Z',
+      fetchImpl,
+      '   ',
+    );
+
+    const requestInit = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(requestInit?.headers).get('Authorization')).toBeNull();
   });
 
   it('supplements a higher-priority ETF record without lowering its canonical trust', () => {
