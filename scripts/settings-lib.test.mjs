@@ -5,12 +5,15 @@ import { test } from 'node:test';
 import {
   SETTINGS_EXAMPLE_PATH,
   generatedWrangler,
+  resolveCloudflareAccount,
   personalizeNewSettings,
   validateSettings,
 } from './settings-lib.mjs';
 import {
   classifyResourceProbe,
+  extractDeploymentUrl,
   findDatabase,
+  parseWranglerWhoamiAccounts,
   parseWranglerRows,
   resolveToolSpec,
 } from './setup-cloudflare.mjs';
@@ -29,6 +32,7 @@ void test('validates the documented example and emits a secret-free Wrangler con
 
   assert.equal(config.name, 'dividend-tracker');
   assert.deepEqual(config.triggers.crons, ['* * * * *']);
+  assert.deepEqual(config.compatibility_flags, ['nodejs_compat']);
   assert.deepEqual(config.secrets.required, ['TOKEN_ENCRYPTION_KEY']);
   assert.equal(config.d1_databases[0].database_id, undefined);
   assert.equal(output.includes(settings.secrets.tokenEncryptionKey), false);
@@ -98,7 +102,7 @@ void test('Cloudflare resource probes fail closed', () => {
   assert.deepEqual(classifyResourceProbe({ status: 1, stdout: '', stderr: 'Cloudflare code: 10007' }), { exists: false });
   assert.throws(
     () => classifyResourceProbe({ status: 1, stdout: '', stderr: 'network not found' }),
-    /probe failed/,
+    /資源檢查失敗/,
   );
 });
 
@@ -107,6 +111,45 @@ void test('Wrangler row parsing and D1 name collision checks fail closed', () =>
   assert.throws(() => parseWranglerRows('{"unexpected":true}'), /安全停止/);
   assert.throws(() => parseWranglerRows('not-json'), /安全停止/);
   assert.deepEqual(findDatabase([{ name: 'same-name' }], 'same-name'), { name: 'same-name', id: '' });
+});
+
+void test('parses only authorised Cloudflare account ids and display names', () => {
+  const raw = JSON.stringify({ result: { accounts: [
+    { id: 'ABCDEFABCDEFABCDEFABCDEFABCDEFAB', name: 'Primary' },
+    { id: 'not-an-account', name: 'Ignored' },
+    { id: '11111111111111111111111111111111', name: '' },
+    { id: '22222222222222222222222222222222', display_name: 'Secondary', email: 'hidden@example.test' },
+  ] } });
+  assert.deepEqual(parseWranglerWhoamiAccounts(raw), [
+    { id: 'abcdefabcdefabcdefabcdefabcdefab', name: 'Primary' },
+    { id: '22222222222222222222222222222222', name: 'Secondary' },
+  ]);
+  assert.throws(
+    () => parseWranglerWhoamiAccounts('{"accounts":[{"id":"bad","name":"x"}]}'),
+    /合法的 Cloudflare 帳戶/,
+  );
+});
+
+void test('resolves configured and single Cloudflare accounts, requiring selection for many', () => {
+  const accounts = [
+    { id: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', name: 'A' },
+    { id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', name: 'B' },
+  ];
+  assert.deepEqual(resolveCloudflareAccount(accounts.slice(0, 1)), accounts[0]);
+  assert.deepEqual(resolveCloudflareAccount(accounts, accounts[1].id), accounts[1]);
+  assert.throws(() => resolveCloudflareAccount(accounts), { code: 'ACCOUNT_SELECTION_REQUIRED' });
+  assert.throws(() => resolveCloudflareAccount(accounts, 'cccccccccccccccccccccccccccccccc'), {
+    code: 'CONFIGURED_ACCOUNT_NOT_AUTHORIZED',
+  });
+});
+
+void test('extracts only HTTPS workers.dev deployment URLs', () => {
+  assert.equal(
+    extractDeploymentUrl('Published https://dividend-tracker.example.workers.dev'),
+    'https://dividend-tracker.example.workers.dev',
+  );
+  assert.equal(extractDeploymentUrl('https://example.com'), null);
+  assert.equal(extractDeploymentUrl('deployment completed without URL'), null);
 });
 
 void test('resolves npm through npm_execpath on Windows', () => {

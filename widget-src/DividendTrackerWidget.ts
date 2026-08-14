@@ -25,6 +25,7 @@ import {
   buildUpcomingSummaries,
   markUpcomingPayloadStale,
   nextRefreshDate,
+  formatTaipeiSyncTime,
   type WidgetAppearance,
   type WidgetTheme,
 } from './formatter';
@@ -440,21 +441,8 @@ function renderUpcomingMedium(widget: ListWidget, res: UpcomingWidgetResponse, i
  * Includes the freshness / cached indicator.
  */
 function buildUpdateLabel(res: WidgetResponse): string {
-  const timestamp = res.freshness?.lastSuccessfulSync ?? res.generatedAt;
-  return timestamp ? `更新 ${formatRelative(timestamp)}` : '已同步';
-}
-
-/**
- * Format an ISO 8601 timestamp as a compact relative time (e.g. "3小時前").
- */
-function formatRelative(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const diffSec = (Date.now() - then) / 1000;
-  if (diffSec < 60) return '剛剛';
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}分前`;
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}小時前`;
-  return `${Math.floor(diffSec / 86400)}天前`;
+  const timestamp = res.freshness?.lastSuccessfulSync;
+  return timestamp ? `同步 ${formatTaipeiSyncTime(timestamp)}` : '尚未同步';
 }
 
 function dashboardUrl(baseUrl: string): string {

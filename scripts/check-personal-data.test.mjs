@@ -45,6 +45,29 @@ void test('allows example domains and rejects build content only when present', 
   assert.equal(findings.some((finding) => finding.category === 'dynamic-term'), true);
 });
 
+void test('does not classify a public GitHub repository URL as deployment data', () => {
+  assert.deepEqual(scanText('https://github.com/public-owner/DividendTracker.git', {
+    path: 'README.md', terms: [],
+  }), []);
+});
+
+void test('always rejects local deployment artifacts and installation-specific resource names', () => {
+  assert.deepEqual(scanText('locally generated', { path: 'settings.json' }), [{
+    category: 'deployment-artifact', path: 'settings.json',
+  }]);
+  const installationName = ['dividend', 'tracker', 'a1b2c3d4'].join('-') + '-db';
+  const findings = scanText(installationName, { path: 'README.md' });
+  assert.equal(findings.some((finding) => finding.category === 'cloudflare-installation-name'), true);
+  const exampleName = ['dividend', 'tracker', '0123abcd'].join('-') + '-db';
+  assert.deepEqual(scanText(exampleName, { path: 'fixture.txt' }), []);
+  assert.equal(scanText('local', { path: 'nested/.env.production' })[0]?.category, 'deployment-artifact');
+  assert.equal(scanText(`{ "accountId": "${'a'.repeat(32)}" }`, { path: 'config.ts' })[0]?.category, 'cloudflare-resource-id');
+  assert.equal(
+    scanText(`TOKEN_ENCRYPTION_KEY=${`${'Ab'.repeat(21)}Z`}`, { path: 'leak.txt' })[0]?.category,
+    'private-key',
+  );
+});
+
 void test('fails closed when a requested build directory is missing', async () => {
   await assert.rejects(() => scanBuildDirectory(join(tmpdir(), 'missing-privacy-build')));
 });
@@ -67,4 +90,26 @@ void test('finds a forbidden term that exists only in an older Git commit', () =
   const findings = scanHistoryRepository(root, ['OLD_PRIVATE_MARKER']);
   assert.equal(findings.some((finding) => finding.category === 'dynamic-term'), true);
   assert.equal(JSON.stringify(findings).includes('OLD_PRIVATE_MARKER'), false);
+});
+
+void test('deployment history mode ignores Git identity but catches removed deployment data', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dividend-tracker-deployment-history-'));
+  roots.push(root);
+  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  git('init');
+  git('config', 'user.name', 'Real GitHub Author');
+  git('config', 'user.email', ['author', 'example.org'].join('@'));
+  const resourceId = ['11111111', '2222', '3333', '4444', '555555555555'].join('-');
+  writeFileSync(join(root, 'wrangler.generated.jsonc'), JSON.stringify({ database_id: resourceId }));
+  git('add', '-f', 'wrangler.generated.jsonc');
+  git('commit', '-m', 'accidental deployment config');
+  unlinkSync(join(root, 'wrangler.generated.jsonc'));
+  writeFileSync(join(root, 'clean.txt'), 'clean');
+  git('add', '--all');
+  git('commit', '-m', 'remove deployment config');
+
+  const findings = scanHistoryRepository(root, [], { deployment: true });
+  assert.equal(findings.some((finding) => finding.category === 'deployment-artifact'), true);
+  assert.equal(findings.some((finding) => finding.path === '(git metadata)'), false);
+  assert.equal(findings.some((finding) => finding.category === 'email'), false);
 });

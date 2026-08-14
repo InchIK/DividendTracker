@@ -39,7 +39,10 @@ export function decideScheduledJobs(
   const configuredDailyTime = normalizeDailyTime(dailyTime);
 
   return {
-    dailyDue: taipeiTime === configuredDailyTime,
+    // Once the configured minute has arrived, keep the daily job eligible for
+    // the remainder of the Taipei calendar day.  The D1 claim/lease protects
+    // against duplicate work while allowing a failed run to retry later.
+    dailyDue: taipeiTime >= configuredDailyTime,
     hourlyPriceDue: minute === 0,
     taipeiDate,
     taipeiTime,

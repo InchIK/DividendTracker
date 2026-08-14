@@ -80,6 +80,22 @@ export function nextRefreshDate(now: Date, refreshMinutes: unknown): Date {
   return new Date(now.getTime() + normalizeWidgetRefreshMinutes(refreshMinutes) * 60_000);
 }
 
+/**
+ * Format an ISO timestamp using a fixed UTC+8 offset for Taipei.
+ *
+ * Scriptable can run with a device timezone that differs from Taiwan, so this
+ * intentionally reads UTC fields after applying the offset instead of using
+ * the host's local date/time methods.
+ */
+export function formatTaipeiSyncTime(iso: string): string {
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed)) return iso;
+
+  const taipei = new Date(parsed + 8 * 60 * 60 * 1000);
+  const pad = (value: number): string => value.toString().padStart(2, '0');
+  return `${taipei.getUTCFullYear().toString().padStart(4, '0')}/${pad(taipei.getUTCMonth() + 1)}/${pad(taipei.getUTCDate())} ${pad(taipei.getUTCHours())}:${pad(taipei.getUTCMinutes())}`;
+}
+
 export interface WidgetAppearance {
   theme: WidgetTheme;
   mode?: WidgetBackgroundMode;

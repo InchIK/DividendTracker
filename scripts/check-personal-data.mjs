@@ -10,6 +10,18 @@ const genericNames = new Set([
   'maintainer', 'example maintainer',
 ]);
 const allowedEmailDomains = new Set(['example.test', 'example.com', 'example.invalid']);
+const deploymentCategories = new Set([
+  'deployment-artifact', 'dynamic-term', 'workers-url', 'private-key',
+  'widget-token', 'cloudflare-resource-id', 'cloudflare-installation-name',
+]);
+const privateGeneratedPaths = [
+  /^settings\.json$/iu,
+  /(?:^|\/)wrangler\.(?!jsonc$).+\.jsonc$/iu,
+  /(?:^|\/)\.dev\.vars(?:\..+)?$/iu,
+  /(?:^|\/)\.env(?:\..+)?$/iu,
+  /(?:^|\/)\.tokens\.local$/iu,
+  /(?:^|\/)\.setup-cloudflare-state\.json$/iu,
+];
 
 function runGit(args, cwd = ROOT) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -34,11 +46,9 @@ function dynamicTerms() {
     const result = spawnSync('git', ['config', '--get', key], { cwd: ROOT, encoding: 'utf8' });
     if (result.status === 0) add(result.stdout.trim());
   }
-  const remote = spawnSync('git', ['config', '--get', 'remote.origin.url'], { cwd: ROOT, encoding: 'utf8' });
-  if (remote.status === 0) {
-    const match = /github\.com[/:]([^/]+)(?:\.git)?/i.exec(remote.stdout.trim());
-    if (match) add(match[1]);
-  }
+  // The public repository owner is expected in canonical clone/raw URLs and is
+  // GitHub identity, not deployment data. Commit author identity remains part
+  // of the optional broad history scan below.
   const settingsPath = resolve(ROOT, 'settings.json');
   if (existsSync(settingsPath)) {
     try {
@@ -58,6 +68,43 @@ function dynamicTerms() {
   return values;
 }
 
+/** Deployment values are local-only even when Git author identity is public. */
+function deploymentTerms() {
+  const values = [];
+  const add = (value) => {
+    if (typeof value !== 'string' || value.length < 3 || values.includes(value)) return;
+    values.push(value);
+  };
+  const settingsPath = resolve(ROOT, 'settings.json');
+  if (existsSync(settingsPath)) {
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      for (const value of [
+        settings.cloudflare?.accountId,
+        settings.cloudflare?.d1?.databaseId,
+        settings.cloudflare?.workerName,
+        settings.cloudflare?.d1?.databaseName,
+        settings.secrets?.tokenEncryptionKey,
+      ]) add(value);
+    } catch {
+      // Normal settings validation reports malformed local configuration.
+    }
+  }
+  for (const value of String(process.env.DEPLOYMENT_PRIVACY_FORBIDDEN_TERMS ?? '').split(/\r?\n/u)) {
+    add(value.trim());
+  }
+  return values;
+}
+
+function isPrivateGeneratedPath(path) {
+  const normalized = path.replaceAll('\\', '/').replace(/^\.\//u, '');
+  return privateGeneratedPaths.some((pattern) => pattern.test(normalized));
+}
+
+function deploymentOnly(findings) {
+  return findings.filter((finding) => deploymentCategories.has(finding.category));
+}
+
 function isAllowedEmail(value) {
   const domain = value.slice(value.lastIndexOf('@') + 1).toLowerCase();
   return allowedEmailDomains.has(domain);
@@ -73,6 +120,7 @@ export function scanText(text, options = {}) {
   const findings = [];
   const path = options.path ?? '';
   const add = (category) => findings.push({ category, path });
+  if (isPrivateGeneratedPath(path)) add('deployment-artifact');
   for (const term of options.terms ?? []) {
     if (term && text.includes(term)) add('dynamic-term');
   }
@@ -95,8 +143,22 @@ export function scanText(text, options = {}) {
   for (const match of text.matchAll(widgetTokens)) {
     if (!/(?:test|example|placeholder)/iu.test(match[0])) add('widget-token');
   }
-  if (/"(?:account_id|database_id)"\s*:\s*"(?:[0-9a-f]{32}|[0-9a-f-]{36})"/iu.test(text)) {
+  if (/["'](?:account_id|database_id|accountId|databaseId|d1DatabaseId)["']\s*[:=]\s*["'](?:[0-9a-f]{32}|[0-9a-f-]{36})["']/iu.test(text)) {
     add('cloudflare-resource-id');
+  }
+  if (!options.scannerSource) {
+    const encryptionKeys = /TOKEN_ENCRYPTION_KEY\s*[:=]\s*["']?([A-Za-z0-9_-]{43})\b/gu;
+    for (const match of text.matchAll(encryptionKeys)) {
+      const value = match[1];
+      const repeatedFixture = new Set(value).size === 1;
+      if (!repeatedFixture && !/(?:test|example|placeholder)/iu.test(value)) add('private-key');
+    }
+  }
+  const installationNames = /\bdividend-tracker-([0-9a-f]{8})(?:-db)?\b/giu;
+  for (const match of text.matchAll(installationNames)) {
+    if (!['0123abcd', 'fedcba98'].includes(match[1].toLowerCase())) {
+      add('cloudflare-installation-name');
+    }
   }
   return findings;
 }
@@ -109,7 +171,7 @@ function trackedFiles() {
   return runGit(['ls-files', '-z']).split('\0').filter(Boolean);
 }
 
-function scanTracked(terms) {
+function scanTracked(terms, deployment = false) {
   const findings = [];
   for (const file of trackedFiles()) {
     const absolutePath = resolve(ROOT, file);
@@ -118,7 +180,7 @@ function scanTracked(terms) {
     if (!isText(buffer)) continue;
     findings.push(...scanText(buffer.toString('utf8'), { path: file, terms, scannerSource: file.endsWith('scripts/check-personal-data.mjs') }));
   }
-  return findings;
+  return deployment ? deploymentOnly(findings) : findings;
 }
 
 async function filesIn(directory) {
@@ -132,7 +194,7 @@ async function filesIn(directory) {
   return result;
 }
 
-export async function scanBuildDirectory(directory, terms = []) {
+export async function scanBuildDirectory(directory, terms = [], options = {}) {
   const absoluteDirectory = resolve(directory);
   if (!existsSync(absoluteDirectory) || !statSync(absoluteDirectory).isDirectory()) throw new Error('指定 build scan 時找不到 dist，已安全停止。');
   const findings = [];
@@ -141,14 +203,14 @@ export async function scanBuildDirectory(directory, terms = []) {
     if (!isText(buffer)) continue;
     findings.push(...scanText(buffer.toString('utf8'), { path: relativePath(file), terms }));
   }
-  return findings;
+  return options.deployment ? deploymentOnly(findings) : findings;
 }
 
-async function scanBuild(terms) {
-  return scanBuildDirectory(resolve(ROOT, 'dist'), terms);
+async function scanBuild(terms, deployment = false) {
+  return scanBuildDirectory(resolve(ROOT, 'dist'), terms, { deployment });
 }
 
-export function scanHistoryRepository(repositoryRoot, terms = []) {
+export function scanHistoryRepository(repositoryRoot, terms = [], options = {}) {
   const findings = [];
   const commits = runGit(['rev-list', '--all'], repositoryRoot).split(/\r?\n/u).filter(Boolean);
   const seen = new Set();
@@ -165,10 +227,12 @@ export function scanHistoryRepository(repositoryRoot, terms = []) {
         }
       }
     }
-    const metadata = runGit(['show', '-s', '--format=%an\n%ae\n%cn\n%ce', commit], repositoryRoot);
-    for (const finding of scanText(metadata, { path: '(git metadata)', terms })) findings.push({ ...finding, commit });
+    if (!options.deployment) {
+      const metadata = runGit(['show', '-s', '--format=%an\n%ae\n%cn\n%ce', commit], repositoryRoot);
+      for (const finding of scanText(metadata, { path: '(git metadata)', terms })) findings.push({ ...finding, commit });
+    }
   }
-  return findings;
+  return options.deployment ? deploymentOnly(findings) : findings;
 }
 
 function printFindings(findings) {
@@ -179,11 +243,11 @@ function printFindings(findings) {
 }
 
 export async function runPrivacyScan(modes) {
-  const terms = dynamicTerms();
+  const terms = modes.deployment ? deploymentTerms() : dynamicTerms();
   const findings = [];
-  if (modes.tracked) findings.push(...scanTracked(terms));
-  if (modes.build) findings.push(...await scanBuild(terms));
-  if (modes.history) findings.push(...scanHistoryRepository(ROOT, terms));
+  if (modes.tracked) findings.push(...scanTracked(terms, modes.deployment));
+  if (modes.build) findings.push(...await scanBuild(terms, modes.deployment));
+  if (modes.history) findings.push(...scanHistoryRepository(ROOT, terms, { deployment: modes.deployment }));
   printFindings(findings);
   return findings.length === 0;
 }
@@ -193,9 +257,10 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     tracked: process.argv.includes('--tracked'),
     build: process.argv.includes('--build'),
     history: process.argv.includes('--history'),
+    deployment: process.argv.includes('--deployment'),
   };
   if (!modes.tracked && !modes.build && !modes.history) {
-    console.error('Usage: node scripts/check-personal-data.mjs --tracked [--build] [--history]');
+    console.error('Usage: node scripts/check-personal-data.mjs --tracked [--build] [--history] [--deployment]');
     process.exitCode = 2;
   } else {
     try {

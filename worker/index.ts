@@ -38,7 +38,11 @@ import { widgetSettingsRoutes } from './routes/widget-settings';
 import { runSync } from './sync/run-sync';
 import { runPriceSync } from './sync/run-price-sync';
 import { decideScheduledJobs } from './sync/scheduled-job';
-import { claimDailySyncDate, getSyncSchedule } from './sync/schedule-settings';
+import {
+  claimDailySyncDate,
+  completeDailySyncDate,
+  getSyncSchedule,
+} from './sync/schedule-settings';
 import { authRoutes } from './routes/auth';
 import type { AuthContextEnv } from './auth/session';
 
@@ -131,6 +135,8 @@ export default {
     if (!decision.dailyDue && !decision.hourlyPriceDue) return;
 
     let dailyClaimed = false;
+    let dailyError: unknown;
+    let dailyFailed = false;
     if (decision.dailyDue) {
       dailyClaimed = await claimDailySyncDate(env.DB, decision.taipeiDate);
       console.log(JSON.stringify({
@@ -140,52 +146,69 @@ export default {
         taipeiDate: decision.taipeiDate,
       }));
       if (dailyClaimed) {
-        const result = await runSync(env, 'cron');
-        console.log(JSON.stringify({
-          message: 'daily sync completed',
-          job: 'daily',
-          outcome: result.status,
-          observationsApplied: result.observationsApplied,
-          eventsChanged: result.eventsChanged,
-        }));
-        if (result.errors.length > 0) console.error(JSON.stringify({
-          message: 'daily sync errors',
-          job: 'daily',
-          errors: result.errors,
-        }));
+        try {
+          const result = await runSync(env, 'cron');
+          console.log(JSON.stringify({
+            message: 'daily sync completed',
+            job: 'daily',
+            outcome: result.status,
+            observationsApplied: result.observationsApplied,
+            eventsChanged: result.eventsChanged,
+          }));
+          if (result.errors.length > 0) console.error(JSON.stringify({
+            message: 'daily sync errors',
+            job: 'daily',
+            errors: result.errors,
+          }));
+          if (result.status === 'success' || result.status === 'partial') {
+            await completeDailySyncDate(env.DB, decision.taipeiDate);
+          }
+        } catch (error) {
+          dailyError = error;
+          dailyFailed = true;
+          console.error(JSON.stringify({
+            message: 'daily sync threw',
+            job: 'daily',
+            outcome: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        }
       }
     }
 
-    // A daily run includes exactly one price pass.  If it was already claimed
-    // by another invocation at an hour boundary, retain the hourly price pass.
-    if (decision.hourlyPriceDue && (!decision.dailyDue || !dailyClaimed)) {
-      const result = await runPriceSync(env);
-      console.log(JSON.stringify({
-        message: 'price sync completed',
-        job: 'hourly_prices',
-        outcome: result.outcome,
-        persisted: result.persisted,
-        selected: result.selected,
-      }));
-      if (result.errors.length > 0) console.error(JSON.stringify({
-        message: 'price sync errors',
-        job: 'hourly_prices',
-        errors: result.errors,
-      }));
-    } else if (dailyClaimed) {
-      const result = await runPriceSync(env);
-      console.log(JSON.stringify({
-        message: 'price sync completed',
-        job: 'daily_prices',
-        outcome: result.outcome,
-        persisted: result.persisted,
-        selected: result.selected,
-      }));
-      if (result.errors.length > 0) console.error(JSON.stringify({
-        message: 'price sync errors',
-        job: 'daily_prices',
-        errors: result.errors,
-      }));
+    // A claimed daily run includes exactly one price pass, even when the
+    // dividend sync throws.  Otherwise retain the hourly pass at the top of
+    // the hour when this invocation did not claim the daily lease.
+    if (dailyClaimed || decision.hourlyPriceDue) {
+      try {
+        const result = await runPriceSync(env);
+        console.log(JSON.stringify({
+          message: 'price sync completed',
+          job: dailyClaimed ? 'daily_prices' : 'hourly_prices',
+          outcome: result.outcome,
+          persisted: result.persisted,
+          selected: result.selected,
+        }));
+        if (result.errors.length > 0) console.error(JSON.stringify({
+          message: 'price sync errors',
+          job: dailyClaimed ? 'daily_prices' : 'hourly_prices',
+          errors: result.errors,
+        }));
+      } catch (error) {
+        console.error(JSON.stringify({
+          message: 'price sync threw',
+          job: dailyClaimed ? 'daily_prices' : 'hourly_prices',
+          outcome: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        if (!dailyFailed) throw error;
+      }
+    }
+
+    // Preserve the original daily exception after the required price pass has
+    // had a chance to run so Cloudflare records the failed invocation.
+    if (dailyFailed) {
+      throw dailyError;
     }
   },
 } satisfies ExportedHandler<Env>;

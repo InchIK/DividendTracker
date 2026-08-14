@@ -21,7 +21,7 @@
 
 - Cloudflare 以每分鐘 Cron 喚醒 scheduler；非到期分鐘不讀取上游。
 - 每個整點更新價格。
-- owner 可在 D1 設定每日完整同步的台北時間，預設 13:35；原子日期 claim 確保同一天最多執行一次。
+- owner 可在 D1 設定每日完整同步的台北時間，預設 13:35；設定時間後以 30 分鐘 D1 lease 防止重複執行，只有成功／部分成功才寫入完成日，中斷或全失敗可在 lease 到期後重試；舊版完成標記若找不到同日成功紀錄會自動忽略。
 - 使用者設定當下立即回補至少一年資料。
 - 支援全台 ETF 與股票的動態設定。
 
@@ -38,13 +38,16 @@ npm test
 npm run build
 npm run test:e2e
 npm run check:privacy:current
+npm run check:deployment-privacy
 node scripts/check-personal-data.mjs --history
 ```
 
-Build 會先清理產物，再執行 tracked/build privacy scan。掃描器是提交前的輔助防線，不取代 secret manager、金鑰輪替或 Cloudflare 權限治理。
+Build 會先清理產物，再執行 tracked/build 個資掃描與部署資料 Git 歷史掃描。掃描器是提交前的輔助防線，不取代 secret manager、金鑰輪替或 Cloudflare 權限治理。
 
 ## Widget 流程
 
 Dashboard 每次下載都驗證目前密碼、輪替新 Token、產生新 installation ID、嵌入目前 Origin，並在連線測試成功後才下載。舊 Widget 立即失效；頁面不顯示或複製 Token，Scriptable 也不會使用舊 Keychain/cache。
 
 Widget 背景、排列方式（預估股息、隨機、股價或指定標的置頂）與 15～1440 分鐘更新間隔都保存在每位使用者的 D1 設定，既有 Widget 會在下次 API 更新時套用。`refreshAfterDate` 只表示 Scriptable 請求的最早更新時間，iOS 可以延後實際喚醒。
+
+Widget 的同步標籤固定以台北時間顯示最近一次成功／部分成功完整同步的實際時間（`同步 YYYY/MM/DD HH:mm`），不使用相對時間，也不代表每小時行情同步或 iOS Widget 喚醒時間。

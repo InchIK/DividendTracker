@@ -12,7 +12,7 @@
   "cloudflare": {
     "accountId": "",
     "workerName": "dividend-tracker",
-    "compatibilityDate": "2026-08-08",
+    "compatibilityDate": "2026-08-14",
     "d1": {
       "binding": "DB",
       "databaseName": "dividend-tracker-db",

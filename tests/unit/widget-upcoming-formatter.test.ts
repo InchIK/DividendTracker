@@ -10,6 +10,7 @@ import {
   compactAmount,
   compactYuanAmount,
   fullAmount,
+  formatTaipeiSyncTime,
   markUpcomingPayloadStale,
   nextRefreshDate,
   normalizeWidgetRefreshMinutes,
@@ -125,6 +126,17 @@ describe('widget refresh policy helpers', () => {
     expect(nextRefreshDate(now, 15).toISOString()).toBe('2026-08-13T00:15:00.000Z');
     expect(nextRefreshDate(now, 1440).toISOString()).toBe('2026-08-14T00:00:00.000Z');
     expect(nextRefreshDate(now, 14).toISOString()).toBe('2026-08-13T03:00:00.000Z');
+  });
+});
+
+describe('Taipei synchronization timestamp formatting', () => {
+  it('converts UTC timestamps across midnight with the exact Taipei format', () => {
+    expect(formatTaipeiSyncTime('2026-08-13T16:07:00.000Z')).toBe('2026/08/14 00:07');
+    expect(formatTaipeiSyncTime('2026-08-13T05:35:00.000Z')).toBe('2026/08/13 13:35');
+  });
+
+  it('returns invalid timestamp input unchanged', () => {
+    expect(formatTaipeiSyncTime('not-a-timestamp')).toBe('not-a-timestamp');
   });
 });
 

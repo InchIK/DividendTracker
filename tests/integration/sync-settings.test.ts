@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import worker from '../../worker/index';
 import { sha256Base64Url } from '../../worker/auth/encoding';
-import { claimDailySyncDate } from '../../worker/sync/schedule-settings';
+import {
+  claimDailySyncDate,
+  completeDailySyncDate,
+} from '../../worker/sync/schedule-settings';
 import {
   applyMultiUserMigrations,
   seedAuthenticatedUser,
@@ -130,9 +133,28 @@ describe('daily sync schedule settings', () => {
     expect(denied.status).toBe(403);
   });
 
-  it('atomically claims each Taipei date once and allows the next date', async () => {
+  it('acquires a lease once, blocks fresh retries, and reacquires after 30 minutes', async () => {
     await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T05:35:00.000Z')).resolves.toBe(true);
-    await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T05:36:00.000Z')).resolves.toBe(false);
+    await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T06:04:00.000Z')).resolves.toBe(false);
+    await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T06:06:00.000Z')).resolves.toBe(true);
+  });
+
+  it('records completion before releasing the lease and blocks same-day reruns', async () => {
+    await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T05:35:00.000Z')).resolves.toBe(true);
+    await env.DB.prepare(
+      `INSERT INTO sync_runs (trigger_kind, started_at, finished_at, status)
+       VALUES ('cron', ?, ?, 'success')`,
+    ).bind('2026-08-13T05:35:00.000Z', '2026-08-13T05:50:00.000Z').run();
+    await completeDailySyncDate(env.DB, '2026-08-13', '2026-08-13T05:50:00.000Z');
+    await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T06:30:00.000Z')).resolves.toBe(false);
     await expect(claimDailySyncDate(env.DB, '2026-08-14', '2026-08-14T05:35:00.000Z')).resolves.toBe(true);
+  });
+
+  it('self-heals a legacy completion marker when no successful run exists that Taipei day', async () => {
+    await env.DB.prepare(
+      `INSERT INTO application_settings (setting_key, setting_value, updated_by_user_id, updated_at)
+       VALUES ('last_daily_sync_date_taipei', '2026-08-13', NULL, '2026-08-13T05:35:00.000Z')`,
+    ).run();
+    await expect(claimDailySyncDate(env.DB, '2026-08-13', '2026-08-13T06:00:00.000Z')).resolves.toBe(true);
   });
 });

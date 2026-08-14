@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { access, readFile, writeFile } from 'node:fs/promises';
+import { access, chmod, readFile, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ export const SETTINGS_PATH = resolve(ROOT, 'settings.json');
 export const SETTINGS_EXAMPLE_PATH = resolve(ROOT, 'settings.example.json');
 export const GENERATED_WRANGLER_PATH = resolve(ROOT, 'wrangler.generated.jsonc');
 export const DEV_VARS_PATH = resolve(ROOT, '.dev.vars');
+export const SETUP_STATE_PATH = resolve(ROOT, '.setup-cloudflare-state.json');
 
 async function exists(path) {
   try {
@@ -36,6 +37,86 @@ export function personalizeNewSettings(template, suffix) {
   settings.cloudflare.d1.databaseName = `dividend-tracker-${suffix}-db`;
   settings.cloudflare.d1.databaseId = '';
   return settings;
+}
+
+/**
+ * Keep only the small, safe account shape that setup needs.  Wrangler has
+ * changed the surrounding JSON shape a few times, so this helper accepts the
+ * documented `accounts` array wherever it appears but never returns raw
+ * response fields (which can include email addresses or other metadata).
+ */
+export function normalizeCloudflareAccounts(accounts) {
+  if (!Array.isArray(accounts)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const account of accounts) {
+    const rawId = typeof account?.id === 'string'
+      ? account.id
+      : typeof account?.account_id === 'string'
+        ? account.account_id
+        : '';
+    const id = rawId.trim().toLowerCase();
+    let displayName = '';
+    if (typeof account?.name === 'string') displayName = account.name.trim();
+    else if (typeof account?.display_name === 'string') displayName = account.display_name.trim();
+    else if (typeof account?.displayName === 'string') displayName = account.displayName.trim();
+    else if (typeof account?.account_name === 'string') displayName = account.account_name.trim();
+    if (!/^[0-9a-f]{32}$/.test(id) || !displayName || seen.has(id)) continue;
+    seen.add(id);
+    normalized.push({ id, name: displayName });
+  }
+  return normalized;
+}
+
+/**
+ * Resolve a configured account or a single authorised account without doing
+ * any I/O.  Multiple accounts deliberately throw a typed error so callers can
+ * choose interactively when a TTY is available and fail closed otherwise.
+ */
+export function resolveCloudflareAccount(accounts, configuredAccountId = '') {
+  const options = !Array.isArray(accounts) && accounts && typeof accounts === 'object'
+    ? accounts
+    : null;
+  const accountRows = options ? options.accounts : accounts;
+  const configuredValue = options
+    ? options.configuredAccountId ?? options.accountId ?? configuredAccountId
+    : configuredAccountId;
+  const validAccounts = normalizeCloudflareAccounts(accountRows);
+  const configured = typeof configuredValue === 'string'
+    ? configuredValue.trim().toLowerCase()
+    : '';
+  if (configured) {
+    const account = validAccounts.find((entry) => entry.id === configured);
+    if (!account) {
+      const error = new Error('設定的 Cloudflare 帳戶未在目前授權帳戶中，請更新 ignored 的 settings.json 後重試。');
+      error.code = 'CONFIGURED_ACCOUNT_NOT_AUTHORIZED';
+      throw error;
+    }
+    return account;
+  }
+  if (validAccounts.length === 1) return validAccounts[0];
+  if (validAccounts.length > 1) {
+    const error = new Error('目前授權了多個 Cloudflare 帳戶，需要選擇帳戶。');
+    error.code = 'ACCOUNT_SELECTION_REQUIRED';
+    error.accounts = validAccounts;
+    throw error;
+  }
+  throw new Error('Wrangler 沒有回傳可用的 Cloudflare 帳戶，請先完成授權後重試。');
+}
+
+// Short aliases keep this pure helper convenient for callers and tests.
+export const resolveAccount = resolveCloudflareAccount;
+export const resolveAccountSelection = resolveCloudflareAccount;
+export const resolveAuthorizedAccount = resolveCloudflareAccount;
+export function resolveAccountId(accountsOrOptions, configuredAccountId = '') {
+  if (Array.isArray(accountsOrOptions)) {
+    return resolveCloudflareAccount(accountsOrOptions, configuredAccountId).id;
+  }
+  const options = accountsOrOptions ?? {};
+  return resolveCloudflareAccount(
+    options.accounts,
+    options.configuredAccountId ?? options.accountId ?? '',
+  ).id;
 }
 
 export async function ensureSettings() {
@@ -69,6 +150,7 @@ export async function loadSettings() {
 export async function writeSettings(settings) {
   validateSettings(settings);
   await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  await chmod(SETTINGS_PATH, 0o600);
 }
 
 function requiredObject(value, name) {
@@ -154,6 +236,7 @@ export function generatedWrangler(settings) {
     name: settings.cloudflare.workerName,
     main: './worker/index.ts',
     compatibility_date: settings.cloudflare.compatibilityDate,
+    compatibility_flags: ['nodejs_compat'],
     ...(settings.cloudflare.accountId ? { account_id: settings.cloudflare.accountId } : {}),
     assets: {
       directory: './dist/client',
